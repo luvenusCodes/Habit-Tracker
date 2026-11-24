@@ -1,0 +1,100 @@
+import bcrypt
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from typing import Optional
+
+from routers.auth import get_current_user
+from storage.users_storage import (
+    get_user_settings_from_db,
+    update_user_settings_in_db,
+    update_user_profile_in_db
+)
+
+router = APIRouter(prefix="/users", tags=["Users & Setttings"])
+
+# Pydantic Schemas
+class UserSettingsResponse(BaseModel):
+    email_notifications: bool
+    push_notifications: bool
+    reminder_time: str
+    timezone: str
+    theme: str
+
+class UserSettingsUpdate(BaseModel):
+    email_notifications: Optional[bool] = None
+    push_notifications: Optional[bool] = None
+    reminder_time: Optional[str] = None
+    timezone: Optional[str] = None
+    theme: Optional[str] = None
+
+class UserProfileUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+
+@router.get("/")
+def get_users():
+    return {"habits": []}
+
+class User:
+    def __init__(
+        self,
+        username,
+        email,
+        user_id=None,
+        password_hash=None
+    ):
+        self.user_id = user_id
+        self.username = username
+        self.email = email
+        self.password_hash = password_hash
+
+    def set_password(self, plain_password: str):
+        # Hashes a plain_text password and stores it.
+        password_bytes = plain_password.encode('utf-8')[:72]
+        salt = bcrypt.gensalt()
+        self.password_hash = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "username": self.username,
+            "email": self.email,
+            "password_hash" : self.password_hash
+        }
+
+# Endpoints
+@router.get("/settings", response_model=UserSettingsResponse)
+def get_user_settings(current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("user_id")or current_user.get("id")
+    settings = get_user_settings_from_db(user_id)
+    if not settings:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    return settings
+
+@router.patch("/settings", response_model=UserSettingsResponse)
+def update_user_settings(
+    settings: UserSettingsUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = current_user.get("user_id") or current_user.get("id")
+    update_data = settings.dict(exclude_unset=True)
+    updated_settings = update_user_settings_in_db(user_id, update_data)
+    if not updated_settings:
+        raise HTTPException(status_code=400, detail="Failed to update settings")
+    return updated_settings
+
+@router.patch("/profile")
+def update_user_profile(
+    profile: UserProfileUpdate,
+    current_user: dict = Depends(get_current_user)
+): 
+    user_id = current_user.get("user_id") or current_user.get("id")
+    update_data = profile.dict(exclude_unset=True)
+    updated_user = update_user_profile_in_db(user_id, update_data)
+    if not updated_user:
+        raise HTTPException(status_code=400, detail="Failed to update profile")
+    return {
+        "message": "Profile updated successfully",
+        "username": updated_user.get("username"),
+        "email": updated_user.get("email")
+    }

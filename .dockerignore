@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.git/
+.gitignore
+tests/
+habit-tracker-client/node_modules/
+habit-tracker-client/dist/

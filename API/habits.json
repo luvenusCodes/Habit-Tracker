@@ -1,0 +1,53 @@
+[
+    {
+        "title": "Gym",
+        "userId": 1,
+        "completed": false,
+        "id": 201
+    },
+    {
+        "title": "gym",
+        "userId": 1,
+        "completed": false,
+        "id": 201
+    },
+    {
+        "habit_id": null,
+        "user_id": 1,
+        "category_id": 1,
+        "habit_name": "Walk",
+        "description": null,
+        "priority": "Medium",
+        "status": "Active",
+        "start_date": "2026-11-08",
+        "target_value": null,
+        "measurement_type": null,
+        "completed_at": null
+    },
+    {
+        "habit_id": null,
+        "user_id": 1,
+        "category_id": 1,
+        "habit_name": "Walk",
+        "description": null,
+        "priority": "Medium",
+        "status": "Active",
+        "start_date": "2026-11-08",
+        "target_value": null,
+        "measurement_type": null,
+        "completed_at": null
+    },
+    {
+        "habit_id": null,
+        "user_id": 1,
+        "category_id": 1,
+        "habit_name": "Running",
+        "description": null,
+        "priority": "Medium",
+        "status": "Active",
+        "start_date": "2026-11-08",
+        "target_value": null,
+        "measurement_type": null,
+        "completed_at": null
+    }
+]

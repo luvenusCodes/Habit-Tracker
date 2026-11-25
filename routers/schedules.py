@@ -1,7 +1,9 @@
+import logging
 import os
-from datetime import datetime, timedelta
-from typing import Literal, Optional
+from datetime import timedelta
+from typing import Dict, List, Literal, Optional, Tuple
 
+import mysql.connector
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from jose import JWTError, jwt
@@ -10,6 +12,8 @@ from pydantic import BaseModel
 from storage.connection import get_db_connection
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 ALGORITHM = "HS256"
@@ -54,6 +58,42 @@ def _format_time_str(val) -> Optional[str]:
     return str(val)
 
 
+def _time_to_minutes(time_str: str) -> int:
+    parts = [int(p) for p in time_str.split(":")]
+    return parts[0] * 60 + parts[1]
+
+
+def _compute_interval(
+    start_str: str,
+    end_str: Optional[str],
+    duration_minutes: Optional[int],
+) -> Tuple[int, int, str]:
+    start_min = _time_to_minutes(start_str)
+    start_short = f"{start_min // 60:02d}:{start_min % 60:02d}"
+
+    if end_str:
+        raw_end = _time_to_minutes(end_str)
+        end_min = raw_end if raw_end > start_min else raw_end + 1440
+    elif duration_minutes and duration_minutes > 0:
+        end_min = start_min + int(duration_minutes)
+    else:
+        end_min = start_min
+
+    end_display_min = end_min % 1440
+    end_short = f"{end_display_min // 60:02d}:{end_display_min % 60:02d}"
+    next_day_tag = " (+1d)" if end_min >= 1440 else ""
+    return start_min, end_min, f"{start_short}–{end_short}{next_day_tag}"
+
+
+def _intervals_collide(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    for shift in (-1440, 0, 1440):
+        s2 = b_start + shift
+        e2 = b_end + shift
+        if a_start <= e2 and s2 <= a_end:
+            return True
+    return False
+
+
 # Pydantic Schemas
 class ScheduleCreate(BaseModel):
     habit_id: int
@@ -62,6 +102,7 @@ class ScheduleCreate(BaseModel):
     end_time: Optional[str] = None
     duration_minutes: Optional[int] = None
     status: Literal["Active", "Inactive"] = "Active"
+    allow_overlap: bool = False
 
 
 class ScheduleStatusUpdate(BaseModel):
@@ -111,8 +152,62 @@ def create_schedule(schedule_data: ScheduleCreate, user_id: int = Depends(get_cu
         if cursor.fetchone():
             raise HTTPException(
                 status_code=400,
-                detail=f"A schedule already exists for {schedule_data.day_of_week} at {schedule_data.start_time}.",
+                detail=f"This habit already has a schedule on {schedule_data.day_of_week} at {schedule_data.start_time[:5]}.",
             )
+
+        # Check time collisions across all active schedules on that day of the week
+        if schedule_data.status == "Active" and not schedule_data.allow_overlap:
+            new_start, new_end, new_window = _compute_interval(
+                schedule_data.start_time,
+                schedule_data.end_time,
+                schedule_data.duration_minutes,
+            )
+
+            cursor.execute(
+                """
+                SELECT s.schedule_id, s.habit_id, h.habit_name, s.start_time, s.end_time, s.duration_minutes
+                FROM habit_schedule s
+                JOIN habits h ON s.habit_id = h.habit_id
+                WHERE h.user_id = %s
+                  AND h.deleted_at IS NULL
+                  AND s.status = 'Active'
+                  AND s.day_of_week = %s
+                """,
+                (user_id, schedule_data.day_of_week),
+            )
+            existing_slots = cursor.fetchall()
+
+            conflicts: List[Dict[str, str]] = []
+            for slot in existing_slots:
+                ex_start_str = _format_time_str(slot.get("start_time")) or "00:00:00"
+                ex_end_str = _format_time_str(slot.get("end_time"))
+                ex_dur = slot.get("duration_minutes")
+                ex_start, ex_end, ex_window = _compute_interval(ex_start_str, ex_end_str, ex_dur)
+
+                if _intervals_collide(new_start, new_end, ex_start, ex_end):
+                    conflicts.append(
+                        {
+                            "habit_name": slot["habit_name"],
+                            "window": ex_window,
+                        }
+                    )
+
+            if conflicts:
+                conflict_summary = ", ".join(
+                    f"{c['habit_name']} ({c['window']})" for c in conflicts
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "SCHEDULE_COLLISION",
+                        "message": (
+                            f"{schedule_data.day_of_week} ({new_window}) overlaps or touches "
+                            f"{conflict_summary}."
+                        ),
+                        "day_of_week": schedule_data.day_of_week,
+                        "conflicts": conflicts,
+                    },
+                )
 
         insert_query = """
             INSERT INTO habit_schedule (
@@ -149,10 +244,14 @@ def create_schedule(schedule_data: ScheduleCreate, user_id: int = Depends(get_cu
 
     except HTTPException:
         raise
-    except Exception as err:
+    except Exception:
         if connection:
             connection.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+        logger.exception("Unexpected error creating schedule")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to save the schedule right now. Please try again.",
+        )
     finally:
         if cursor:
             cursor.close()
@@ -207,8 +306,12 @@ def get_schedules_for_habit(habit_id: int, user_id: int = Depends(get_current_us
 
     except HTTPException:
         raise
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+    except Exception:
+        logger.exception("Unexpected error fetching schedules for habit_id=%s", habit_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load schedules right now. Please try again.",
+        )
     finally:
         if cursor:
             cursor.close()
@@ -255,10 +358,14 @@ def update_schedule_status(
 
     except HTTPException:
         raise
-    except Exception as err:
+    except Exception:
         if connection:
             connection.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+        logger.exception("Unexpected error updating schedule status schedule_id=%s", schedule_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to update schedule status right now. Please try again.",
+        )
     finally:
         if cursor:
             cursor.close()
@@ -287,17 +394,50 @@ def delete_schedule(schedule_id: int, user_id: int = Depends(get_current_user_id
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Schedule not found or unauthorized.")
 
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM habit_occurrences WHERE schedule_id = %s",
+            (schedule_id,),
+        )
+        occurrence_count = cursor.fetchone()["cnt"]
+
+        if occurrence_count > 0:
+            cursor.execute(
+                "UPDATE habit_schedule SET status = 'Inactive' WHERE schedule_id = %s",
+                (schedule_id,),
+            )
+            connection.commit()
+            return {
+                "message": "This schedule already has logged occurrences, so it was set to Inactive to preserve your history.",
+                "schedule_id": schedule_id,
+                "archived": True,
+            }
+
         cursor.execute("DELETE FROM habit_schedule WHERE schedule_id = %s", (schedule_id,))
         connection.commit()
 
-        return {"message": "Schedule deleted successfully.", "schedule_id": schedule_id}
+        return {
+            "message": "Schedule removed successfully.",
+            "schedule_id": schedule_id,
+            "archived": False,
+        }
 
     except HTTPException:
         raise
-    except Exception as err:
+    except mysql.connector.IntegrityError:
         if connection:
             connection.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+        raise HTTPException(
+            status_code=400,
+            detail="This schedule has linked history and cannot be permanently removed. Switch it to Inactive instead.",
+        )
+    except Exception:
+        if connection:
+            connection.rollback()
+        logger.exception("Unexpected error deleting schedule schedule_id=%s", schedule_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to remove this schedule right now. Please try again.",
+        )
     finally:
         if cursor:
             cursor.close()

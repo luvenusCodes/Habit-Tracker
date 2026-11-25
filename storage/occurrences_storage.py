@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Optional
 import mysql.connector
 
 from storage.connection import get_db_connection
-from storage.goals_storage import record_occurrence_goal_progress
+from storage.goals_storage import (
+    record_occurrence_goal_progress,
+    remove_occurrence_goal_progress,
+)
 
 
 class OccurrenceRuleError(Exception):
@@ -221,6 +224,12 @@ def update_occurrence_status_in_db(
         goal_progress_recorded: List[Dict[str, Any]] = []
         if new_status == "Done":
             goal_progress_recorded = record_occurrence_goal_progress(
+                cursor=cursor,
+                occurrence_id=occurrence_id,
+                user_id=user_id,
+            )
+        elif old_status == "Done" and new_status != "Done":
+            remove_occurrence_goal_progress(
                 cursor=cursor,
                 occurrence_id=occurrence_id,
                 user_id=user_id,

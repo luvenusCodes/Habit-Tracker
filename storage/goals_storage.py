@@ -1,9 +1,11 @@
 from datetime import date, datetime, timedelta
+import logging
 from typing import Any, Dict, List, Optional
 import mysql.connector
 
 from storage.connection import get_db_connection
 
+logger = logging.getLogger(__name__)
 
 VALID_GOAL_STATUSES = {
     "Planned",
@@ -52,6 +54,43 @@ def _serialize_goal(row: Dict[str, Any], progress_percentage: float = 0.0) -> Di
         "created_at": str(row["created_at"]) if row.get("created_at") else None,
         "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
     }
+
+
+def _ensure_default_goal_criterion(cursor, goal_id: int, user_id: int, goal_name: str) -> int:
+    """
+    Ensures every goal has a single underlying tracking criterion so direct
+    Habit-to-Goal links work seamlessly without manual Criteria setup.
+    """
+    cursor.execute(
+        """
+        SELECT criterion_id
+        FROM goal_criteria
+        WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
+        ORDER BY criterion_id ASC
+        LIMIT 1
+        """,
+        (goal_id, user_id),
+    )
+    row = cursor.fetchone()
+    if row:
+        return row["criterion_id"]
+
+    cursor.execute(
+        """
+        INSERT INTO goal_criteria (
+            goal_id, user_id, criterion_name, description,
+            measurement_type, target_value, measurement_unit, is_mandatory, status
+        )
+        VALUES (%s, %s, %s, %s, 'Count', 1, 'completions', 1, 'Active')
+        """,
+        (
+            goal_id,
+            user_id,
+            f"{goal_name.strip()[:80]} Progress",
+            "Auto-managed goal habit tracker",
+        ),
+    )
+    return cursor.lastrowid
 
 
 def _activate_due_planned_goals(cursor, user_id: Optional[int] = None, goal_id: Optional[int] = None) -> int:
@@ -171,16 +210,6 @@ def _expire_overdue_goals(cursor, user_id: Optional[int] = None, goal_id: Option
         uid = g["user_id"]
         old_status = g["status"]
 
-        if old_status == "Active":
-            _evaluate_goal_and_criteria_completion(cursor, gid, uid)
-            cursor.execute(
-                "SELECT status FROM goals WHERE goal_id = %s AND user_id = %s",
-                (gid, uid),
-            )
-            refreshed = cursor.fetchone()
-            if refreshed and refreshed["status"] == "Completed":
-                continue
-
         cursor.execute(
             """
             UPDATE goals
@@ -219,38 +248,69 @@ def _sync_goal_lifecycle_states(cursor, user_id: Optional[int] = None, goal_id: 
 
 
 def _compute_goal_progress_percentage(cursor, goal_id: int, user_id: int) -> float:
+    """
+    Computes goal progress directly from linked habits:
+    - Earned completions = count of recorded progress items (Done occurrences) for this goal.
+    - Denominator = total non-cancelled occurrences of linked habits inside [start_date, end_date]
+      (or total recorded completions if no occurrences exist yet).
+    """
     cursor.execute(
         """
-        SELECT
-            gc.criterion_id,
-            gc.target_value,
-            COALESCE(SUM(gpr.contribution_amount), 0) AS earned_amount
-        FROM goal_criteria gc
-        LEFT JOIN goal_progress_records gpr
-            ON gc.criterion_id = gpr.criterion_id AND gpr.user_id = gc.user_id
-        WHERE gc.goal_id = %s
-          AND gc.user_id = %s
-          AND gc.status IN ('Active', 'Completed')
-          AND gc.deleted_at IS NULL
-        GROUP BY gc.criterion_id, gc.target_value
+        SELECT start_date, end_date, status
+        FROM goals
+        WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
         """,
         (goal_id, user_id),
     )
-    criteria_rows = cursor.fetchall()
-    if not criteria_rows:
+    goal_row = cursor.fetchone()
+    if not goal_row:
         return 0.0
 
-    percentages = []
-    for row in criteria_rows:
-        target = float(row["target_value"])
-        earned = float(row["earned_amount"] or 0.00)
-        if target > 0:
-            pct = min(100.0, (earned / target) * 100.0)
-            percentages.append(pct)
+    if goal_row["status"] == "Completed":
+        return 100.0
 
-    if not percentages:
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(gpr.contribution_amount), 0) AS earned_count
+        FROM goal_progress_records gpr
+        JOIN goal_criteria gc ON gpr.criterion_id = gc.criterion_id
+        WHERE gc.goal_id = %s
+          AND gpr.user_id = %s
+          AND gc.deleted_at IS NULL
+        """,
+        (goal_id, user_id),
+    )
+    earned_count = float(cursor.fetchone()["earned_count"] or 0.0)
+    if earned_count <= 0:
         return 0.0
-    return round(sum(percentages) / len(percentages), 2)
+
+    # Count total scheduled/logged occurrences of linked habits within the goal window
+    date_clauses = ["o.occurrence_date >= %s"]
+    params: List[Any] = [goal_id, user_id, goal_row["start_date"] or date.today()]
+    if goal_row.get("end_date"):
+        date_clauses.append("o.occurrence_date <= %s")
+        params.append(goal_row["end_date"])
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(DISTINCT o.occurrence_id) AS total_occ
+        FROM habit_occurrences o
+        JOIN habit_goals hg
+            ON o.habit_id = hg.habit_id
+        WHERE hg.goal_id = %s
+          AND hg.user_id = %s
+          AND hg.deleted_at IS NULL
+          AND o.status NOT IN ('Cancelled', 'Carried Over')
+          AND {" AND ".join(date_clauses)}
+        """,
+        tuple(params),
+    )
+    total_occ = int(cursor.fetchone()["total_occ"] or 0)
+    denominator = max(total_occ, int(earned_count))
+    if denominator <= 0:
+        return 0.0
+
+    return round(min(100.0, (earned_count / denominator) * 100.0), 2)
 
 
 def create_goal(
@@ -263,10 +323,10 @@ def create_goal(
 ) -> Dict[str, Any]:
     effective_start = start_date or date.today()
     if end_date is not None and end_date < effective_start:
-        raise GoalRuleError("end_date cannot be earlier than start_date.", status_code=400)
+        raise GoalRuleError("End date cannot be earlier than start date.", status_code=400)
 
     if end_date is not None and end_date < date.today():
-        raise GoalRuleError("end_date cannot be in the past.", status_code=400)
+        raise GoalRuleError("End date cannot be in the past.", status_code=400)
 
     initial_status = "Active" if effective_start <= date.today() else "Planned"
 
@@ -284,6 +344,9 @@ def create_goal(
             (user_id, goal_name.strip(), description, effective_start, end_date, initial_status, notes),
         )
         new_goal_id = cursor.lastrowid
+
+        # Auto-create the internal tracking criterion so users never have to configure criteria manually
+        _ensure_default_goal_criterion(cursor, new_goal_id, user_id, goal_name)
 
         cursor.execute(
             """
@@ -317,10 +380,11 @@ def create_goal(
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database constraint or query error: {err}", status_code=400)
+        logger.exception("Database error creating goal")
+        raise GoalRuleError("Could not create the goal. Please check your inputs and try again.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -459,22 +523,22 @@ def update_goal_details(
         if "start_date" in provided_fields and start_date != current_start:
             if existing["status"] != "Planned" or current_start <= today:
                 raise GoalRuleError(
-                    "Goal start_date cannot be changed after the goal has started.",
+                    "Goal start date cannot be changed after the goal has started.",
                     status_code=400,
                 )
             if start_date is None:
-                raise GoalRuleError("start_date cannot be null.", status_code=400)
+                raise GoalRuleError("Start date cannot be empty.", status_code=400)
             new_start = start_date
         else:
             new_start = current_start
 
         new_end = end_date if "end_date" in provided_fields else existing["end_date"]
         if new_end is not None and new_end < new_start:
-            raise GoalRuleError("end_date cannot be earlier than start_date.", status_code=400)
+            raise GoalRuleError("End date cannot be earlier than start date.", status_code=400)
 
         new_name = goal_name.strip() if ("goal_name" in provided_fields and goal_name is not None) else existing["goal_name"]
         if not new_name:
-            raise GoalRuleError("goal_name cannot be empty.", status_code=400)
+            raise GoalRuleError("Goal name cannot be empty.", status_code=400)
 
         new_description = description if "description" in provided_fields else existing["description"]
         new_notes = notes if "notes" in provided_fields else existing["notes"]
@@ -512,10 +576,11 @@ def update_goal_details(
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error updating goal_id=%s", goal_id)
+        raise GoalRuleError("Could not update goal details. Please try again.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -531,13 +596,7 @@ def change_goal_status(
 ) -> Dict[str, Any]:
     if new_status not in VALID_GOAL_STATUSES:
         raise GoalRuleError(
-            f"Invalid goal status '{new_status}'. Must be one of {sorted(VALID_GOAL_STATUSES)}.",
-            status_code=400,
-        )
-
-    if new_status == "Completed":
-        raise GoalRuleError(
-            "Goal status cannot be manually set to 'Completed'. Completion is calculated automatically when all mandatory criteria are satisfied.",
+            f"Invalid goal status '{new_status}'.",
             status_code=400,
         )
 
@@ -565,7 +624,7 @@ def change_goal_status(
 
         old_status = existing["status"]
         if old_status == new_status:
-            raise GoalRuleError(f"Goal is already in status '{new_status}'.", status_code=400)
+            raise GoalRuleError(f"Goal is already '{new_status}'.", status_code=400)
 
         if old_status == "Completed" and new_status == "Abandoned":
             raise GoalRuleError("Completed goals cannot be abandoned.", status_code=400)
@@ -573,7 +632,7 @@ def change_goal_status(
         allowed_next = ALLOWED_MANUAL_TRANSITIONS.get(old_status, set())
         if new_status not in allowed_next:
             raise GoalRuleError(
-                f"Invalid status transition from '{old_status}' to '{new_status}'. Allowed transitions: {sorted(allowed_next)}.",
+                f"Cannot change status from '{old_status}' to '{new_status}'.",
                 status_code=400,
             )
 
@@ -584,7 +643,7 @@ def change_goal_status(
                     end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
                 if end_date < date.today():
                     raise GoalRuleError(
-                        "Cannot activate a goal whose end_date has already passed. Extend the end_date first.",
+                        "Cannot activate a goal whose end date has already passed. Extend the end date first.",
                         status_code=400,
                     )
 
@@ -608,8 +667,6 @@ def change_goal_status(
 
         if new_status in {"Abandoned", "Archived", "Expired"}:
             _auto_unlink_terminal_goal_habits(cursor, goal_id, user_id)
-        elif new_status == "Active":
-            _evaluate_goal_and_criteria_completion(cursor, goal_id, user_id)
 
         cursor.execute(
             """
@@ -629,15 +686,17 @@ def change_goal_status(
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error changing status for goal_id=%s", goal_id)
+        raise GoalRuleError("Could not update goal status. Please try again.", status_code=400)
     finally:
         if cursor:
             cursor.close()
         if connection and connection.is_connected():
             connection.close()
+
 
 def delete_goal(goal_id: int, user_id: int) -> Dict[str, Any]:
     connection = None
@@ -690,15 +749,17 @@ def delete_goal(goal_id: int, user_id: int) -> Dict[str, Any]:
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error deleting goal_id=%s", goal_id)
+        raise GoalRuleError("Could not delete goal. Please try again.", status_code=400)
     finally:
         if cursor:
             cursor.close()
         if connection and connection.is_connected():
             connection.close()
+
 
 def _serialize_criterion(row: Dict[str, Any]) -> Dict[str, Any]:
     target = float(row["target_value"])
@@ -723,9 +784,13 @@ def _serialize_criterion(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -> None:
+    """
+    Re-evaluates goal completion when an end_date is reached and all scheduled
+    linked occurrences in the window have been completed (100%).
+    """
     cursor.execute(
         """
-        SELECT status
+        SELECT status, end_date
         FROM goals
         WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
         FOR UPDATE
@@ -736,71 +801,9 @@ def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -
     if not goal_row or goal_row["status"] != "Active":
         return
 
-    cursor.execute(
-        """
-        SELECT
-            gc.criterion_id,
-            gc.target_value,
-            gc.is_mandatory,
-            gc.status,
-            COALESCE(SUM(gpr.contribution_amount), 0) AS earned_amount
-        FROM goal_criteria gc
-        LEFT JOIN goal_progress_records gpr
-            ON gc.criterion_id = gpr.criterion_id AND gpr.user_id = gc.user_id
-        WHERE gc.goal_id = %s
-          AND gc.user_id = %s
-          AND gc.status IN ('Active', 'Completed')
-          AND gc.deleted_at IS NULL
-        GROUP BY gc.criterion_id, gc.target_value, gc.is_mandatory, gc.status
-        """,
-        (goal_id, user_id),
-    )
-    criteria = cursor.fetchall()
-
-    mandatory_total = 0
-    mandatory_completed = 0
-
-    for c in criteria:
-        target = float(c["target_value"])
-        earned = float(c["earned_amount"] or 0.0)
-        current_status = c["status"]
-        new_status = current_status
-
-        if earned >= target and current_status == "Active":
-            new_status = "Completed"
-        elif earned < target and current_status == "Completed":
-            new_status = "Active"
-
-        if new_status != current_status:
-            cursor.execute(
-                """
-                UPDATE goal_criteria
-                SET status = %s
-                WHERE criterion_id = %s AND user_id = %s
-                """,
-                (new_status, c["criterion_id"], user_id),
-            )
-            cursor.execute(
-                """
-                INSERT INTO goal_criteria_history
-                    (criterion_id, user_id, field_name, old_value, new_value, changed_by, changed_by_type, reason)
-                VALUES (%s, %s, 'status', %s, %s, NULL, 'System', %s)
-                """,
-                (
-                    c["criterion_id"],
-                    user_id,
-                    current_status,
-                    new_status,
-                    "Criterion status recalculated automatically from recorded progress.",
-                ),
-            )
-
-        if bool(c["is_mandatory"]):
-            mandatory_total += 1
-            if new_status == "Completed":
-                mandatory_completed += 1
-
-    if mandatory_total > 0 and mandatory_completed == mandatory_total:
+    pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
+    end_date = goal_row.get("end_date")
+    if end_date is not None and end_date <= date.today() and pct >= 100.0:
         cursor.execute(
             """
             UPDATE goals
@@ -816,7 +819,7 @@ def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -
                     (goal_id, user_id, old_status, new_status, changed_by, changed_by_type, reason)
                 VALUES (%s, %s, 'Active', 'Completed', NULL, 'System', %s)
                 """,
-                (goal_id, user_id, "All mandatory goal criteria satisfied."),
+                (goal_id, user_id, "Goal completed with 100% habit adherence."),
             )
             _auto_unlink_terminal_goal_habits(cursor, goal_id, user_id)
 
@@ -868,10 +871,7 @@ def create_goal_criterion(
     is_mandatory: bool = True,
 ) -> Dict[str, Any]:
     if measurement_type not in VALID_MEASUREMENT_TYPES:
-        raise GoalRuleError(
-            f"Invalid measurement_type '{measurement_type}'. Must be one of {sorted(VALID_MEASUREMENT_TYPES)}.",
-            status_code=400,
-        )
+        raise GoalRuleError(f"Invalid measurement_type '{measurement_type}'.", status_code=400)
     if target_value <= 0:
         raise GoalRuleError("target_value must be greater than 0.", status_code=400)
 
@@ -901,12 +901,9 @@ def create_goal_criterion(
         if not goal:
             raise GoalRuleError("Goal not found or unauthorized.", status_code=404)
 
-        if goal["status"] == "Completed":
-            raise GoalRuleError("Completed goals cannot accept new criteria.", status_code=400)
-
-        if goal["status"] in {"Abandoned", "Archived", "Expired"}:
+        if goal["status"] in {"Completed", "Abandoned", "Archived", "Expired"}:
             raise GoalRuleError(
-                f"Cannot add criteria to a goal with status '{goal['status']}'.",
+                f"Cannot modify a goal with status '{goal['status']}'.",
                 status_code=400,
             )
 
@@ -930,7 +927,6 @@ def create_goal_criterion(
             ),
         )
         new_criterion_id = cursor.lastrowid
-
         created = _fetch_criterion_with_progress(cursor, new_criterion_id, goal_id, user_id)
         connection.commit()
         return created
@@ -939,10 +935,11 @@ def create_goal_criterion(
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error creating criterion for goal_id=%s", goal_id)
+        raise GoalRuleError("Could not save criterion.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -958,11 +955,7 @@ def list_goal_criteria(goal_id: int, user_id: int, include_inactive: bool = True
         cursor = connection.cursor(dictionary=True)
 
         cursor.execute(
-            """
-            SELECT goal_id
-            FROM goals
-            WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
-            """,
+            "SELECT goal_id FROM goals WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL",
             (goal_id, user_id),
         )
         if not cursor.fetchone():
@@ -1001,8 +994,7 @@ def list_goal_criteria(goal_id: int, user_id: int, include_inactive: bool = True
             """,
             (goal_id, user_id),
         )
-        rows = cursor.fetchall()
-        return [_serialize_criterion(row) for row in rows]
+        return [_serialize_criterion(row) for row in cursor.fetchall()]
 
     finally:
         if cursor:
@@ -1053,14 +1045,8 @@ def update_goal_criterion(
         if not goal:
             raise GoalRuleError("Goal not found or unauthorized.", status_code=404)
 
-        if goal["status"] == "Completed":
-            raise GoalRuleError("Cannot modify criteria on a Completed goal.", status_code=400)
-
-        if goal["status"] in {"Abandoned", "Archived", "Expired"}:
-            raise GoalRuleError(
-                f"Cannot modify criteria on a goal with status '{goal['status']}'.",
-                status_code=400,
-            )
+        if goal["status"] in {"Completed", "Abandoned", "Archived", "Expired"}:
+            raise GoalRuleError(f"Cannot modify a goal with status '{goal['status']}'.", status_code=400)
 
         cursor.execute(
             """
@@ -1076,39 +1062,6 @@ def update_goal_criterion(
         if not existing:
             raise GoalRuleError("Criterion not found or unauthorized.", status_code=404)
 
-        if "measurement_type" in updates:
-            if updates["measurement_type"] not in VALID_MEASUREMENT_TYPES:
-                raise GoalRuleError(
-                    f"Invalid measurement_type '{updates['measurement_type']}'.",
-                    status_code=400,
-                )
-
-        if "target_value" in updates:
-            if updates["target_value"] is None or float(updates["target_value"]) <= 0:
-                raise GoalRuleError("target_value must be greater than 0.", status_code=400)
-
-        if "status" in updates:
-            if updates["status"] not in {"Active", "Inactive"}:
-                raise GoalRuleError(
-                    "Criterion status can only be manually set to 'Active' or 'Inactive'. 'Completed' is calculated automatically.",
-                    status_code=400,
-                )
-
-        if "criterion_name" in updates:
-            if not updates["criterion_name"] or not updates["criterion_name"].strip():
-                raise GoalRuleError("criterion_name cannot be empty.", status_code=400)
-            updates["criterion_name"] = updates["criterion_name"].strip()
-
-        if "measurement_unit" in updates:
-            if not updates["measurement_unit"] or not updates["measurement_unit"].strip():
-                raise GoalRuleError("measurement_unit cannot be empty.", status_code=400)
-            updates["measurement_unit"] = updates["measurement_unit"].strip()
-
-        if "is_mandatory" in updates:
-            if updates["is_mandatory"] is None:
-                raise GoalRuleError("is_mandatory cannot be null.", status_code=400)
-            updates["is_mandatory"] = 1 if updates["is_mandatory"] else 0
-
         history_entries = []
         set_clauses = []
         params = []
@@ -1120,6 +1073,7 @@ def update_goal_criterion(
                 old_str = f"{float(old_val):.2f}"
                 new_str = f"{float(new_val):.2f}"
             elif field_name == "is_mandatory":
+                new_val = 1 if new_val else 0
                 changed = int(bool(old_val)) != int(bool(new_val))
                 old_str = str(int(bool(old_val)))
                 new_str = str(int(bool(new_val)))
@@ -1134,7 +1088,7 @@ def update_goal_criterion(
                 history_entries.append((criterion_id, user_id, field_name, old_str, new_str, user_id, reason))
 
         if not set_clauses:
-            raise GoalRuleError("No actual changes detected for the criterion.", status_code=400)
+            raise GoalRuleError("No actual changes detected.", status_code=400)
 
         params.extend([criterion_id, goal_id, user_id])
         cursor.execute(
@@ -1156,8 +1110,6 @@ def update_goal_criterion(
                 entry,
             )
 
-        _evaluate_goal_and_criteria_completion(cursor, goal_id, user_id)
-
         updated = _fetch_criterion_with_progress(cursor, criterion_id, goal_id, user_id)
         connection.commit()
         return updated
@@ -1166,10 +1118,11 @@ def update_goal_criterion(
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error updating criterion_id=%s", criterion_id)
+        raise GoalRuleError("Could not update criterion.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -1232,6 +1185,10 @@ def link_habit_to_goal(
     user_id: int,
     actor_type: str = "User",
 ) -> Dict[str, Any]:
+    """
+    Links a habit directly to a goal and automatically attaches it to the goal's
+    internal tracking criterion so completions immediately count toward goal progress.
+    """
     if actor_type not in VALID_ACTOR_TYPES:
         raise GoalRuleError(f"Invalid actor_type '{actor_type}'.", status_code=400)
 
@@ -1247,7 +1204,7 @@ def link_habit_to_goal(
 
         cursor.execute(
             """
-            SELECT goal_id, status
+            SELECT goal_id, goal_name, status
             FROM goals
             WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
             FOR UPDATE
@@ -1290,7 +1247,7 @@ def link_habit_to_goal(
         )
         if cursor.fetchone():
             raise GoalRuleError(
-                "This habit is already actively linked to this goal.",
+                "This habit is already linked to this goal.",
                 status_code=409,
             )
 
@@ -1303,6 +1260,29 @@ def link_habit_to_goal(
             (habit_id, goal_id, user_id, linked_by, actor_type),
         )
         new_link_id = cursor.lastrowid
+
+        # Automatically attach the habit to the goal's internal tracking criterion
+        default_criterion_id = _ensure_default_goal_criterion(
+            cursor, goal_id, user_id, goal["goal_name"]
+        )
+        cursor.execute(
+            """
+            SELECT goal_criterion_habits_id
+            FROM goal_criteria_habits
+            WHERE habit_id = %s AND criterion_id = %s AND user_id = %s
+              AND unlinked_at IS NULL AND deleted_at IS NULL
+            """,
+            (habit_id, default_criterion_id, user_id),
+        )
+        if not cursor.fetchone():
+            cursor.execute(
+                """
+                INSERT INTO goal_criteria_habits
+                    (criterion_id, habit_id, user_id, linked_by, linked_by_type)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (default_criterion_id, habit_id, user_id, linked_by, actor_type),
+            )
 
         cursor.execute(
             """
@@ -1325,12 +1305,14 @@ def link_habit_to_goal(
         if connection:
             connection.rollback()
         if getattr(err, "errno", None) == 1062:
-            raise GoalRuleError("This habit is already actively linked to this goal.", status_code=409)
-        raise GoalRuleError(f"Database integrity error: {err}", status_code=400)
-    except mysql.connector.Error as err:
+            raise GoalRuleError("This habit is already linked to this goal.", status_code=409)
+        logger.exception("Integrity error linking habit_id=%s to goal_id=%s", habit_id, goal_id)
+        raise GoalRuleError("Could not link habit to goal.", status_code=400)
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error linking habit_id=%s to goal_id=%s", habit_id, goal_id)
+        raise GoalRuleError("Could not link habit to goal.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -1417,10 +1399,11 @@ def unlink_habit_from_goal(
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.Error as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        logger.exception("Database error unlinking habit_id=%s from goal_id=%s", habit_id, goal_id)
+        raise GoalRuleError("Could not unlink habit from goal.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -1456,8 +1439,7 @@ def list_goal_habits(goal_id: int, user_id: int, include_history: bool = False) 
             """,
             (goal_id, user_id),
         )
-        rows = cursor.fetchall()
-        return [_serialize_habit_goal_link(r) for r in rows]
+        return [_serialize_habit_goal_link(r) for r in cursor.fetchall()]
 
     finally:
         if cursor:
@@ -1484,65 +1466,6 @@ def link_habit_to_criterion(
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        _sync_goal_lifecycle_states(cursor, user_id=user_id, goal_id=goal_id)
-
-        cursor.execute(
-            """
-            SELECT g.goal_id, g.status AS goal_status, gc.criterion_id, gc.status AS criterion_status
-            FROM goals g
-            JOIN goal_criteria gc ON g.goal_id = gc.goal_id AND g.user_id = gc.user_id
-            WHERE g.goal_id = %s
-              AND gc.criterion_id = %s
-              AND g.user_id = %s
-              AND g.deleted_at IS NULL
-              AND gc.deleted_at IS NULL
-            FOR UPDATE
-            """,
-            (goal_id, criterion_id, user_id),
-        )
-        target_row = cursor.fetchone()
-        if not target_row:
-            raise GoalRuleError("Goal or criterion not found or unauthorized.", status_code=404)
-
-        if target_row["goal_status"] in {"Completed", "Abandoned", "Archived", "Expired"}:
-            raise GoalRuleError(
-                f"Cannot link habits to criteria of a goal with status '{target_row['goal_status']}'.",
-                status_code=400,
-            )
-
-        if target_row["criterion_status"] == "Inactive":
-            raise GoalRuleError("Cannot link a habit to an Inactive criterion.", status_code=400)
-
-        cursor.execute(
-            """
-            SELECT habit_id, habit_name, status
-            FROM habits
-            WHERE habit_id = %s AND user_id = %s AND deleted_at IS NULL
-            """,
-            (habit_id, user_id),
-        )
-        habit = cursor.fetchone()
-        if not habit:
-            raise GoalRuleError("Habit not found or unauthorized.", status_code=404)
-
-        if habit["status"] == "Deleted":
-            raise GoalRuleError("Cannot link a deleted habit to a criterion.", status_code=400)
-
-        cursor.execute(
-            """
-            SELECT habit_goal_id
-            FROM habit_goals
-            WHERE habit_id = %s AND goal_id = %s AND user_id = %s
-              AND unlinked_at IS NULL AND deleted_at IS NULL
-            """,
-            (habit_id, goal_id, user_id),
-        )
-        if not cursor.fetchone():
-            raise GoalRuleError(
-                "Habit must be actively linked to the parent goal before it can be linked to a criterion.",
-                status_code=400,
-            )
-
         cursor.execute(
             """
             SELECT goal_criterion_habits_id
@@ -1553,10 +1476,7 @@ def link_habit_to_criterion(
             (habit_id, criterion_id, user_id),
         )
         if cursor.fetchone():
-            raise GoalRuleError(
-                "This habit is already actively linked to this criterion.",
-                status_code=409,
-            )
+            raise GoalRuleError("This habit is already linked.", status_code=409)
 
         cursor.execute(
             """
@@ -1567,7 +1487,6 @@ def link_habit_to_criterion(
             (criterion_id, habit_id, user_id, linked_by, actor_type),
         )
         new_link_id = cursor.lastrowid
-
         cursor.execute(
             """
             SELECT gch.*, h.habit_name
@@ -1577,24 +1496,18 @@ def link_habit_to_criterion(
             """,
             (new_link_id,),
         )
-        created_link = cursor.fetchone()
+        created = cursor.fetchone()
         connection.commit()
-        return _serialize_criterion_habit_link(created_link)
+        return _serialize_criterion_habit_link(created)
 
     except GoalRuleError:
         if connection:
             connection.rollback()
         raise
-    except mysql.connector.IntegrityError as err:
+    except mysql.connector.Error:
         if connection:
             connection.rollback()
-        if getattr(err, "errno", None) == 1062:
-            raise GoalRuleError("This habit is already actively linked to this criterion.", status_code=409)
-        raise GoalRuleError(f"Database integrity error: {err}", status_code=400)
-    except mysql.connector.Error as err:
-        if connection:
-            connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        raise GoalRuleError("Could not link habit.", status_code=400)
     finally:
         if cursor:
             cursor.close()
@@ -1609,11 +1522,7 @@ def unlink_habit_from_criterion(
     user_id: int,
     actor_type: str = "User",
 ) -> Dict[str, Any]:
-    if actor_type not in VALID_ACTOR_TYPES:
-        raise GoalRuleError(f"Invalid actor_type '{actor_type}'.", status_code=400)
-
     unlinked_by = user_id if actor_type == "User" else None
-
     connection = None
     cursor = None
     try:
@@ -1638,10 +1547,7 @@ def unlink_habit_from_criterion(
         )
         active_link = cursor.fetchone()
         if not active_link:
-            raise GoalRuleError(
-                "Active relationship between this habit and criterion was not found.",
-                status_code=404,
-            )
+            raise GoalRuleError("Active link not found.", status_code=404)
 
         cursor.execute(
             """
@@ -1653,7 +1559,6 @@ def unlink_habit_from_criterion(
             """,
             (unlinked_by, actor_type, active_link["goal_criterion_habits_id"], user_id),
         )
-
         cursor.execute(
             """
             SELECT gch.*, h.habit_name
@@ -1663,18 +1568,9 @@ def unlink_habit_from_criterion(
             """,
             (active_link["goal_criterion_habits_id"],),
         )
-        updated_link = cursor.fetchone()
+        updated = cursor.fetchone()
         connection.commit()
-        return _serialize_criterion_habit_link(updated_link)
-
-    except GoalRuleError:
-        if connection:
-            connection.rollback()
-        raise
-    except mysql.connector.Error as err:
-        if connection:
-            connection.rollback()
-        raise GoalRuleError(f"Database error: {err}", status_code=400)
+        return _serialize_criterion_habit_link(updated)
     finally:
         if cursor:
             cursor.close()
@@ -1694,17 +1590,6 @@ def list_criterion_habits(
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute(
-            """
-            SELECT criterion_id
-            FROM goal_criteria
-            WHERE criterion_id = %s AND goal_id = %s AND user_id = %s AND deleted_at IS NULL
-            """,
-            (criterion_id, goal_id, user_id),
-        )
-        if not cursor.fetchone():
-            raise GoalRuleError("Goal or criterion not found or unauthorized.", status_code=404)
-
         active_filter = "" if include_history else "AND gch.unlinked_at IS NULL"
         cursor.execute(
             f"""
@@ -1719,9 +1604,7 @@ def list_criterion_habits(
             """,
             (criterion_id, user_id),
         )
-        rows = cursor.fetchall()
-        return [_serialize_criterion_habit_link(r) for r in rows]
-
+        return [_serialize_criterion_habit_link(r) for r in cursor.fetchall()]
     finally:
         if cursor:
             cursor.close()
@@ -1729,41 +1612,11 @@ def list_criterion_habits(
             connection.close()
 
 
-def _calculate_contribution_amount(measurement_type: str, occurrence_row: Dict[str, Any]) -> float:
-    if measurement_type == "Count":
-        return 1.00
-
-    if measurement_type == "Duration":
-        if occurrence_row.get("duration_minutes") is not None and float(occurrence_row["duration_minutes"]) > 0:
-            return round(float(occurrence_row["duration_minutes"]), 2)
-        if occurrence_row.get("start_time") is not None and occurrence_row.get("end_time") is not None:
-            base_day = date.today()
-            start_dt = (
-                datetime.combine(base_day, datetime.min.time()) + occurrence_row["start_time"]
-                if isinstance(occurrence_row["start_time"], timedelta)
-                else datetime.combine(base_day, occurrence_row["start_time"])
-            )
-            end_dt = (
-                datetime.combine(base_day, datetime.min.time()) + occurrence_row["end_time"]
-                if isinstance(occurrence_row["end_time"], timedelta)
-                else datetime.combine(base_day, occurrence_row["end_time"])
-            )
-            diff_minutes = (end_dt - start_dt).total_seconds() / 60.0
-            if diff_minutes > 0:
-                return round(diff_minutes, 2)
-        return 1.00
-
-    if measurement_type == "Quantity":
-        if occurrence_row.get("metric_target_snapshot") is not None and float(occurrence_row["metric_target_snapshot"]) > 0:
-            return round(float(occurrence_row["metric_target_snapshot"]), 2)
-        if occurrence_row.get("habit_target_value") is not None and float(occurrence_row["habit_target_value"]) > 0:
-            return round(float(occurrence_row["habit_target_value"]), 2)
-        return 1.00
-
-    return 1.00
-
-
 def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) -> List[Dict[str, Any]]:
+    """
+    Records +1 completion progress for every active goal directly linked to the
+    habit when an occurrence is marked 'Done'.
+    """
     _sync_goal_lifecycle_states(cursor, user_id=user_id)
 
     cursor.execute(
@@ -1772,13 +1625,9 @@ def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) ->
             o.occurrence_id,
             o.habit_id,
             o.occurrence_date,
-            o.start_time,
-            o.end_time,
-            o.duration_minutes,
-            o.metric_target_snapshot,
             o.status,
             o.completed_at,
-            h.target_value AS habit_target_value
+            h.habit_name
         FROM habit_occurrences o
         JOIN habits h ON o.habit_id = h.habit_id
         WHERE o.occurrence_id = %s
@@ -1801,47 +1650,36 @@ def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) ->
             g.goal_id,
             g.goal_name,
             g.start_date,
-            g.end_date,
-            gc.criterion_id,
-            gc.criterion_name,
-            gc.measurement_type,
-            gc.target_value,
-            gc.measurement_unit
-        FROM goal_criteria_habits gch
-        JOIN goal_criteria gc
-            ON gch.criterion_id = gc.criterion_id AND gch.user_id = gc.user_id
+            g.end_date
+        FROM habit_goals hg
         JOIN goals g
-            ON gc.goal_id = g.goal_id AND gc.user_id = g.user_id
-        JOIN habit_goals hg
-            ON hg.habit_id = gch.habit_id AND hg.goal_id = g.goal_id AND hg.user_id = g.user_id
-        WHERE gch.habit_id = %s
-          AND gch.user_id = %s
-          AND gch.unlinked_at IS NULL
-          AND gch.deleted_at IS NULL
+            ON hg.goal_id = g.goal_id AND hg.user_id = g.user_id
+        WHERE hg.habit_id = %s
+          AND hg.user_id = %s
           AND hg.unlinked_at IS NULL
           AND hg.deleted_at IS NULL
-          AND gc.status = 'Active'
-          AND gc.deleted_at IS NULL
           AND g.status = 'Active'
           AND g.deleted_at IS NULL
         """,
         (occ["habit_id"], user_id),
     )
-    eligible_criteria = cursor.fetchall()
-    if not eligible_criteria:
+    linked_goals = cursor.fetchall()
+    if not linked_goals:
         return []
 
     recorded_items: List[Dict[str, Any]] = []
-    affected_goal_ids = set()
     recorded_timestamp = occ["completed_at"] or datetime.now()
 
-    for item in eligible_criteria:
-        if item["start_date"] and occ_date < item["start_date"]:
+    for g in linked_goals:
+        if g["start_date"] and occ_date < g["start_date"]:
             continue
-        if item["end_date"] and occ_date > item["end_date"]:
+        if g["end_date"] and occ_date > g["end_date"]:
             continue
 
-        criterion_id = item["criterion_id"]
+        criterion_id = _ensure_default_goal_criterion(
+            cursor, g["goal_id"], user_id, g["goal_name"]
+        )
+
         cursor.execute(
             """
             SELECT *
@@ -1854,46 +1692,47 @@ def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) ->
         if cursor.fetchone():
             continue
 
-        contribution = _calculate_contribution_amount(item["measurement_type"], occ)
-        if contribution <= 0:
-            continue
-
         cursor.execute(
             """
             INSERT INTO goal_progress_records (
                 criterion_id, habit_occurrence_id, user_id,
                 contribution_amount, recorded_at
             )
-            VALUES (%s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, 1.00, %s)
             """,
-            (
-                criterion_id,
-                occurrence_id,
-                user_id,
-                contribution,
-                recorded_timestamp,
-            ),
+            (criterion_id, occurrence_id, user_id, recorded_timestamp),
         )
         progress_id = cursor.lastrowid
-        affected_goal_ids.add(item["goal_id"])
 
         recorded_items.append(
             {
                 "progress_id": progress_id,
-                "goal_id": item["goal_id"],
-                "goal_name": item["goal_name"],
+                "goal_id": g["goal_id"],
+                "goal_name": g["goal_name"],
                 "criterion_id": criterion_id,
-                "criterion_name": item["criterion_name"],
+                "criterion_name": occ["habit_name"],
                 "habit_occurrence_id": occurrence_id,
-                "contribution_amount": contribution,
-                "measurement_unit": item["measurement_unit"],
+                "contribution_amount": 1.0,
+                "measurement_unit": "completions",
             }
         )
 
-    for gid in affected_goal_ids:
-        _evaluate_goal_and_criteria_completion(cursor, gid, user_id)
-
     return recorded_items
+
+
+def remove_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) -> int:
+    """
+    Removes any previously recorded goal progress if an occurrence is changed away
+    from 'Done' (e.g., marked 'Not Done', 'Skipped', or 'Cancelled').
+    """
+    cursor.execute(
+        """
+        DELETE FROM goal_progress_records
+        WHERE habit_occurrence_id = %s AND user_id = %s
+        """,
+        (occurrence_id, user_id),
+    )
+    return cursor.rowcount
 
 
 def get_goal_progress_summary(goal_id: int, user_id: int) -> Dict[str, Any]:
@@ -1924,44 +1763,12 @@ def get_goal_progress_summary(goal_id: int, user_id: int) -> Dict[str, Any]:
         cursor.execute(
             """
             SELECT
-                gc.criterion_id,
-                gc.goal_id,
-                gc.user_id,
-                gc.criterion_name,
-                gc.description,
-                gc.measurement_type,
-                gc.target_value,
-                gc.measurement_unit,
-                gc.is_mandatory,
-                gc.status,
-                gc.created_at,
-                gc.updated_at,
-                COALESCE(SUM(gpr.contribution_amount), 0) AS earned_amount
-            FROM goal_criteria gc
-            LEFT JOIN goal_progress_records gpr
-                ON gc.criterion_id = gpr.criterion_id AND gpr.user_id = gc.user_id
-            WHERE gc.goal_id = %s
-              AND gc.user_id = %s
-              AND gc.deleted_at IS NULL
-            GROUP BY
-                gc.criterion_id, gc.goal_id, gc.user_id, gc.criterion_name,
-                gc.description, gc.measurement_type, gc.target_value,
-                gc.measurement_unit, gc.is_mandatory, gc.status,
-                gc.created_at, gc.updated_at
-            ORDER BY gc.created_at ASC, gc.criterion_id ASC
-            """,
-            (goal_id, user_id),
-        )
-        criteria_list = [_serialize_criterion(r) for r in cursor.fetchall()]
-
-        cursor.execute(
-            """
-            SELECT
                 gpr.*,
                 gc.goal_id,
-                gc.criterion_name
+                COALESCE(o.habit_name_snapshot, gc.criterion_name) AS display_habit_name
             FROM goal_progress_records gpr
             JOIN goal_criteria gc ON gpr.criterion_id = gc.criterion_id
+            LEFT JOIN habit_occurrences o ON gpr.habit_occurrence_id = o.occurrence_id
             WHERE gc.goal_id = %s AND gpr.user_id = %s
             ORDER BY gpr.recorded_at DESC
             """,
@@ -1985,7 +1792,7 @@ def get_goal_progress_summary(goal_id: int, user_id: int) -> Dict[str, Any]:
                     "progress_id": pk_val,
                     "goal_id": r["goal_id"],
                     "criterion_id": r["criterion_id"],
-                    "criterion_name": r["criterion_name"],
+                    "criterion_name": r["display_habit_name"],
                     "user_id": r["user_id"],
                     "habit_occurrence_id": occ_id,
                     "contribution_amount": float(r["contribution_amount"]),
@@ -1995,7 +1802,7 @@ def get_goal_progress_summary(goal_id: int, user_id: int) -> Dict[str, Any]:
 
         return {
             "goal": _serialize_goal(goal_row, progress_percentage=overall_pct),
-            "criteria_progress": criteria_list,
+            "criteria_progress": [],
             "records_count": len(progress_records),
             "progress_records": progress_records,
         }
@@ -2027,8 +1834,7 @@ def get_goal_status_history(goal_id: int, user_id: int) -> List[Dict[str, Any]]:
 
         cursor.execute(
             """
-            SELECT
-                gsh.*
+            SELECT gsh.*
             FROM goal_status_history gsh
             WHERE gsh.goal_id = %s AND gsh.user_id = %s
             ORDER BY gsh.changed_at DESC
@@ -2065,128 +1871,11 @@ def get_criterion_modification_history(
     criterion_id: int,
     user_id: int,
 ) -> List[Dict[str, Any]]:
-    connection = None
-    cursor = None
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute(
-            """
-            SELECT gc.criterion_id, gc.criterion_name, gc.user_id
-            FROM goal_criteria gc
-            JOIN goals g ON gc.goal_id = g.goal_id AND gc.user_id = g.user_id
-            WHERE gc.criterion_id = %s
-              AND gc.goal_id = %s
-              AND gc.user_id = %s
-              AND g.deleted_at IS NULL
-              AND gc.deleted_at IS NULL
-            """,
-            (criterion_id, goal_id, user_id),
-        )
-        criterion = cursor.fetchone()
-        if not criterion:
-            raise GoalRuleError("Goal or criterion not found or unauthorized.", status_code=404)
-
-        cursor.execute(
-            """
-            SELECT
-                gch.*,
-                gc.user_id
-            FROM goal_criteria_history gch
-            JOIN goal_criteria gc ON gch.criterion_id = gc.criterion_id
-            WHERE gch.criterion_id = %s AND gc.user_id = %s
-            ORDER BY gch.changed_at DESC
-            """,
-            (criterion_id, user_id),
-        )
-        rows = cursor.fetchall()
-        results = []
-        for r in rows:
-            pk_val = next((v for k, v in r.items() if k.endswith("_id") and k not in {"criterion_id", "user_id"}), None)
-            results.append(
-                {
-                    "history_id": pk_val,
-                    "criterion_id": r["criterion_id"],
-                    "criterion_name": criterion["criterion_name"],
-                    "user_id": r["user_id"],
-                    "field_name": r["field_name"],
-                    "old_value": r["old_value"],
-                    "new_value": r["new_value"],
-                    "changed_by": r["changed_by"],
-                    "changed_by_type": r["changed_by_type"],
-                    "reason": r["reason"],
-                    "changed_at": str(r["changed_at"]) if r.get("changed_at") else None,
-                }
-            )
-        return results
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
+    return []
 
 
 def get_all_goal_criteria_history(goal_id: int, user_id: int) -> List[Dict[str, Any]]:
-    connection = None
-    cursor = None
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute(
-            """
-            SELECT goal_id
-            FROM goals
-            WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
-            """,
-            (goal_id, user_id),
-        )
-        if not cursor.fetchone():
-            raise GoalRuleError("Goal not found or unauthorized.", status_code=404)
-
-        cursor.execute(
-            """
-            SELECT
-                gch.*,
-                gc.criterion_name,
-                gc.user_id
-            FROM goal_criteria_history gch
-            JOIN goal_criteria gc ON gch.criterion_id = gc.criterion_id
-            WHERE gc.goal_id = %s
-              AND gc.user_id = %s
-              AND gc.deleted_at IS NULL
-            ORDER BY gch.changed_at DESC
-            """,
-            (goal_id, user_id),
-        )
-        rows = cursor.fetchall()
-        results = []
-        for r in rows:
-            pk_val = next((v for k, v in r.items() if k.endswith("_id") and k not in {"criterion_id", "user_id"}), None)
-            results.append(
-                {
-                    "history_id": pk_val,
-                    "criterion_id": r["criterion_id"],
-                    "criterion_name": r["criterion_name"],
-                    "user_id": r["user_id"],
-                    "field_name": r["field_name"],
-                    "old_value": r["old_value"],
-                    "new_value": r["new_value"],
-                    "changed_by": r["changed_by"],
-                    "changed_by_type": r["changed_by_type"],
-                    "reason": r["reason"],
-                    "changed_at": str(r["changed_at"]) if r.get("changed_at") else None,
-                }
-            )
-        return results
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
+    return []
 
 
 def run_user_goal_maintenance(user_id: int) -> Dict[str, Any]:
@@ -2205,10 +1894,11 @@ def run_user_goal_maintenance(user_id: int) -> Dict[str, Any]:
             "expired_count": summary["expired_count"],
         }
 
-    except Exception as err:
+    except Exception:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"Goal maintenance error: {err}", status_code=500)
+        logger.exception("Goal maintenance error for user_id=%s", user_id)
+        raise GoalRuleError("Unable to sync goal statuses right now.", status_code=500)
     finally:
         if cursor:
             cursor.close()
@@ -2232,10 +1922,11 @@ def run_system_goal_maintenance() -> Dict[str, Any]:
             "expired_count": summary["expired_count"],
         }
 
-    except Exception as err:
+    except Exception:
         if connection:
             connection.rollback()
-        raise GoalRuleError(f"System goal maintenance error: {err}", status_code=500)
+        logger.exception("System goal maintenance error")
+        raise GoalRuleError("Unable to run system goal maintenance.", status_code=500)
     finally:
         if cursor:
             cursor.close()

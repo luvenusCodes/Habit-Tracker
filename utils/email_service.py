@@ -1,8 +1,8 @@
+import json
 import logging
 import os
-import smtplib
-import ssl
-from email.message import EmailMessage
+import urllib.error
+import urllib.request
 
 from dotenv import load_dotenv
 
@@ -10,27 +10,18 @@ load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-
-_PLACEHOLDERS = {"", "your_email@gmail.com", "your_email_app_password"}
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "Habit Tracker <onboarding@resend.dev>")
 
 
 def send_otp_email(recipient_email: str, otp_code: str, purpose: str = "Verification") -> bool:
-    """Sends a 6-digit OTP code to the user's email via SMTP."""
-    if SMTP_USER in _PLACEHOLDERS or SMTP_PASSWORD in _PLACEHOLDERS:
-        logger.warning("SMTP credentials not configured; running in simulation mode.")
+    """Sends a 6-digit OTP code via Resend's HTTPS API (port 443)."""
+    if not RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY not configured; running in simulation mode.")
         print(f"--- [MOCK EMAIL TO {recipient_email}] ---")
         print(f"Your {purpose} code is: {otp_code}")
         print("------------------------------------------")
         return True
-
-    msg = EmailMessage()
-    msg["Subject"] = f"Your Habit Tracker {purpose} Code"
-    msg["From"] = SMTP_USER
-    msg["To"] = recipient_email
 
     email_body = (
         f"Hello,\n\n"
@@ -41,21 +32,34 @@ def send_otp_email(recipient_email: str, otp_code: str, purpose: str = "Verifica
         f"Best regards,\n"
         f"Habit Tracker Team"
     )
-    msg.set_content(email_body)
 
-    context = ssl.create_default_context()
+    payload = json.dumps({
+        "from": FROM_EMAIL,
+        "to": [recipient_email],
+        "subject": f"Your Habit Tracker {purpose} Code",
+        "text": email_body,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "habit-tracker-api/1.0",
+        },
+        method="POST",
+    )
 
     try:
-        if SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=15) as server:
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-                server.starttls(context=context)
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.send_message(msg)
-        return True
+        with urllib.request.urlopen(req, timeout=15) as response:
+            status = response.getcode()
+            logger.info("OTP email sent to %s (HTTP %s)", recipient_email, status)
+            return 200 <= status < 300
+    except urllib.error.HTTPError as exc:
+        error_detail = exc.read().decode("utf-8", errors="replace")
+        print(f"Resend HTTP Error [{exc.code}]: {error_detail}")
+        return False
     except Exception as exc:
-        print(f"SMTP Error [{type(exc).__name__}]: {repr(exc)}")
+        print(f"Resend Error [{type(exc).__name__}]: {repr(exc)}")
         return False

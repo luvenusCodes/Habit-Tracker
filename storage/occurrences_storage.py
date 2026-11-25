@@ -27,7 +27,7 @@ def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] =
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         gen_date = (
             datetime.strptime(target_date_str, "%Y-%m-%d").date()
@@ -135,7 +135,7 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         target_date = date_str or str(date.today())
 
@@ -177,7 +177,7 @@ def update_occurrence_status_in_db(
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         auth_query = """
             SELECT o.occurrence_id, o.status AS current_status, o.base_score, h.user_id
@@ -274,7 +274,7 @@ def carry_forward_occurrence_in_db(
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         fetch_query = """
             SELECT o.*, h.user_id AS owner_user_id
@@ -414,7 +414,7 @@ def fetch_occurrence_history(occurrence_id: int, user_id: int) -> Dict[str, Any]
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         cursor.execute(
             """
@@ -457,7 +457,7 @@ def fetch_score_summary(user_id: int, date_str: Optional[str] = None) -> Dict[st
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         target_date = date_str or str(date.today())
 
@@ -501,7 +501,7 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         today = date.today()
         start_date = today - timedelta(days=days - 1)

@@ -5,6 +5,7 @@ import {
     createHabitSchedule,
     updateHabitScheduleStatus,
     deleteHabitSchedule,
+    ScheduleCollisionError,
 } from '../services/api';
 
 interface HabitScheduleManagerProps {
@@ -34,7 +35,6 @@ const SHORT_DAY_LABELS: Record<DayOfWeek, string> = {
 
 const formatTimeShort = (timeStr?: string | null) => {
     if (!timeStr) return '';
-    // Normalize "08:00:00" or "8:00:00" -> "08:00"
     const parts = timeStr.split(':');
     if (parts.length >= 2) {
         return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
@@ -54,6 +54,8 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
     const [submitting, setSubmitting] = useState<boolean>(false);
     const [busyScheduleId, setBusyScheduleId] = useState<number | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [infoBanner, setInfoBanner] = useState<string | null>(null);
+    const [collisionMessage, setCollisionMessage] = useState<string | null>(null);
 
     // Form states
     const [selectedDays, setSelectedDays] = useState<DayOfWeek[]>(['Monday']);
@@ -85,13 +87,13 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
     }, [loadSchedules]);
 
     const toggleDaySelection = (day: DayOfWeek) => {
+        setCollisionMessage(null);
         setSelectedDays((prev) =>
             prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
         );
     };
 
-    const handleAddSchedules = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const submitSchedules = async (allowOverlap: boolean) => {
         if (selectedDays.length === 0) {
             setError('Select at least one day of the week.');
             return;
@@ -112,6 +114,8 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
         try {
             setSubmitting(true);
             setError(null);
+            setInfoBanner(null);
+            setCollisionMessage(null);
 
             for (const day of selectedDays) {
                 await createHabitSchedule({
@@ -121,15 +125,26 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                     end_time: timingMode === 'end_time' ? `${endTime}:00` : null,
                     duration_minutes: timingMode === 'duration' ? Number(durationMinutes) : null,
                     status: 'Active',
+                    allow_overlap: allowOverlap,
                 });
             }
 
             await loadSchedules();
         } catch (err) {
-            setError((err as Error).message);
+            if (err instanceof ScheduleCollisionError) {
+                setCollisionMessage(err.message);
+                await loadSchedules();
+            } else {
+                setError((err as Error).message);
+            }
         } finally {
             setSubmitting(false);
         }
+    };
+
+    const handleAddSchedules = async (e: React.FormEvent) => {
+        e.preventDefault();
+        await submitSchedules(false);
     };
 
     const handleToggleStatus = async (schedule: HabitSchedule) => {
@@ -137,6 +152,7 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
         try {
             setBusyScheduleId(schedule.schedule_id);
             setError(null);
+            setInfoBanner(null);
             await updateHabitScheduleStatus(schedule.schedule_id, nextStatus);
             await loadSchedules();
         } catch (err) {
@@ -150,7 +166,11 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
         try {
             setBusyScheduleId(scheduleId);
             setError(null);
-            await deleteHabitSchedule(scheduleId);
+            setInfoBanner(null);
+            const res = await deleteHabitSchedule(scheduleId);
+            if (res?.archived && res?.message) {
+                setInfoBanner(res.message);
+            }
             await loadSchedules();
         } catch (err) {
             setError((err as Error).message);
@@ -170,9 +190,41 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                 </span>
             </div>
 
+            {infoBanner && (
+                <div className="p-2.5 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    {infoBanner}
+                </div>
+            )}
+
             {error && (
                 <div className="p-2.5 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
                     {error}
+                </div>
+            )}
+
+            {collisionMessage && (
+                <div className="p-3 text-xs text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/35 border border-amber-300 dark:border-amber-700 rounded-lg space-y-2">
+                    <p className="font-medium">
+                        Schedule Collision: {collisionMessage}
+                    </p>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={() => setCollisionMessage(null)}
+                            className="px-2.5 py-1 rounded-md border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/50 font-medium"
+                        >
+                            Adjust Time
+                        </button>
+                        <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={() => submitSchedules(true)}
+                            className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                        >
+                            Schedule Anyway
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -255,16 +307,20 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                         <div className="flex gap-2 text-[11px]">
                             <button
                                 type="button"
-                                onClick={() =>
-                                    setSelectedDays(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
-                                }
+                                onClick={() => {
+                                    setCollisionMessage(null);
+                                    setSelectedDays(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+                                }}
                                 className="text-indigo-600 dark:text-indigo-400 hover:underline"
                             >
                                 Weekdays
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setSelectedDays([...DAYS_OF_WEEK])}
+                                onClick={() => {
+                                    setCollisionMessage(null);
+                                    setSelectedDays([...DAYS_OF_WEEK]);
+                                }}
                                 className="text-indigo-600 dark:text-indigo-400 hover:underline"
                             >
                                 Every Day
@@ -300,7 +356,10 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                         <input
                             type="time"
                             value={startTime}
-                            onChange={(e) => setStartTime(e.target.value)}
+                            onChange={(e) => {
+                                setCollisionMessage(null);
+                                setStartTime(e.target.value);
+                            }}
                             className="w-full px-2.5 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         />
                     </div>
@@ -311,7 +370,10 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                         </label>
                         <select
                             value={timingMode}
-                            onChange={(e) => setTimingMode(e.target.value as 'duration' | 'end_time')}
+                            onChange={(e) => {
+                                setCollisionMessage(null);
+                                setTimingMode(e.target.value as 'duration' | 'end_time');
+                            }}
                             className="w-full px-2.5 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         >
                             <option value="duration">Duration (mins)</option>
@@ -329,7 +391,10 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                                 min={1}
                                 max={1439}
                                 value={durationMinutes}
-                                onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                                onChange={(e) => {
+                                    setCollisionMessage(null);
+                                    setDurationMinutes(Number(e.target.value));
+                                }}
                                 className="w-full px-2.5 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             />
                         </div>
@@ -341,17 +406,19 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                             <input
                                 type="time"
                                 value={endTime}
-                                onChange={(e) => setEndTime(e.target.value)}
+                                onChange={(e) => {
+                                    setCollisionMessage(null);
+                                    setEndTime(e.target.value);
+                                }}
                                 className="w-full px-2.5 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             />
                         </div>
                     )}
                 </div>
 
-                {/* ADD THIS RIGHT HERE: */}
                 {timingMode === 'end_time' && isOvernightSlot(startTime, endTime) && (
                     <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5">
-                        🌙 Overnight schedule - ends at {endTime} the next day.
+                        Overnight schedule - ends at {endTime} the next day.
                     </p>
                 )}
 

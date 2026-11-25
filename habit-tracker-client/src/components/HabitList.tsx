@@ -221,7 +221,7 @@ export const HabitList = () => {
                         </button>
                     </div>
                 ) : (
-                    <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+                    <ul className="grid grid-cols-1 lg:grid-cols-2 items-start gap-3 sm:gap-4">
                         {filteredHabits.map((habit) => {
                             const isEditing = editingId === habit.habit_id;
                             const isConfirmingDelete = confirmDeleteId === habit.habit_id;
@@ -387,8 +387,8 @@ export const HabitList = () => {
                                                                 )
                                                             }
                                                             className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors mr-auto ${openScheduleHabitId === habit.habit_id
-                                                                    ? 'bg-indigo-600 text-white border-indigo-600'
-                                                                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'
+                                                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'
                                                                 }`}
                                                         >
                                                             {openScheduleHabitId === habit.habit_id ? 'Hide Schedule' : 'Schedule'}

@@ -2,13 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import type {
     Goal,
     GoalStatus,
-    GoalCriterion,
-    MeasurementType,
     HabitGoalLink,
-    CriterionHabitLink,
     GoalProgressSummary,
     GoalStatusHistoryItem,
-    CriterionHistoryItem,
 } from '../types/goals';
 import {
     fetchGoals,
@@ -17,18 +13,11 @@ import {
     deleteGoal,
     changeGoalStatus,
     runGoalMaintenance,
-    createGoalCriterion,
-    updateGoalCriterion,
-    deactivateGoalCriterion,
     fetchGoalHabits,
     linkHabitToGoal,
     unlinkHabitFromGoal,
-    fetchCriterionHabits,
-    linkHabitToCriterion,
-    unlinkHabitFromCriterion,
     fetchGoalProgressSummary,
     fetchGoalStatusHistory,
-    fetchGoalCriteriaHistory,
     extractApiError,
 } from '../services/goalsService';
 import { fetchHabits } from '../services/habitService';
@@ -91,14 +80,12 @@ export function GoalsManager() {
 
     // Selected goal workspace
     const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
-    const [detailTab, setDetailTab] = useState<'criteria' | 'habits' | 'progress' | 'history'>('criteria');
+    const [detailTab, setDetailTab] = useState<'habits' | 'progress' | 'history'>('habits');
     const [detailLoading, setDetailLoading] = useState<boolean>(false);
 
     const [progressSummary, setProgressSummary] = useState<GoalProgressSummary | null>(null);
     const [goalHabits, setGoalHabits] = useState<HabitGoalLink[]>([]);
-    const [criterionHabitsMap, setCriterionHabitsMap] = useState<Record<number, CriterionHabitLink[]>>({});
     const [statusHistory, setStatusHistory] = useState<GoalStatusHistoryItem[]>([]);
-    const [criteriaHistory, setCriteriaHistory] = useState<CriterionHistoryItem[]>([]);
     const [allUserHabits, setAllUserHabits] = useState<UserHabitOption[]>([]);
 
     // Create Goal Form State
@@ -117,25 +104,12 @@ export function GoalsManager() {
     const [editGoalEnd, setEditGoalEnd] = useState('');
     const [editGoalNotes, setEditGoalNotes] = useState('');
 
-    // Status Change Modal / Inline Controls
+    // Status Change Inline Controls
     const [targetStatus, setTargetStatus] = useState<GoalStatus | ''>('');
     const [statusReason, setStatusReason] = useState('');
 
-    // Create Criterion Form State
-    const [critName, setCritName] = useState('');
-    const [critType, setCritType] = useState<MeasurementType>('Count');
-    const [critTarget, setCritTarget] = useState('1');
-    const [critUnit, setCritUnit] = useState('sessions');
-    const [critMandatory, setCritMandatory] = useState(true);
-
-    // Edit Criterion Inline State
-    const [editingCritId, setEditingCritId] = useState<number | null>(null);
-    const [editCritTarget, setEditCritTarget] = useState('');
-    const [editCritReason, setEditCritReason] = useState('');
-
     // Habit Linking State
     const [selectedParentHabitId, setSelectedParentHabitId] = useState<string>('');
-    const [selectedCritHabitMap, setSelectedCritHabitMap] = useState<Record<number, string>>({});
 
     const loadGoals = useCallback(async () => {
         setLoading(true);
@@ -172,29 +146,14 @@ export function GoalsManager() {
         setDetailLoading(true);
         setError(null);
         try {
-            const [summary, links, sHist, cHist] = await Promise.all([
+            const [summary, links, sHist] = await Promise.all([
                 fetchGoalProgressSummary(goalId),
                 fetchGoalHabits(goalId, true),
                 fetchGoalStatusHistory(goalId),
-                fetchGoalCriteriaHistory(goalId),
             ]);
             setProgressSummary(summary);
             setGoalHabits(links);
             setStatusHistory(sHist);
-            setCriteriaHistory(cHist);
-
-            // Load linked habits per criterion
-            const critLinksEntries = await Promise.all(
-                summary.criteria_progress.map(async (c) => {
-                    const cLinks = await fetchCriterionHabits(goalId, c.criterion_id, false);
-                    return [c.criterion_id, cLinks] as const;
-                })
-            );
-            const map: Record<number, CriterionHabitLink[]> = {};
-            for (const [cid, cLinks] of critLinksEntries) {
-                map[cid] = cLinks;
-            }
-            setCriterionHabitsMap(map);
         } catch (err) {
             setError(extractApiError(err, 'Failed to load goal details.'));
         } finally {
@@ -234,9 +193,10 @@ export function GoalsManager() {
             setNewGoalDesc('');
             setNewGoalEnd('');
             setNewGoalNotes('');
-            setBanner(`Goal "${created.goal_name}" created (${created.status}).`);
+            setBanner(`Goal "${created.goal_name}" created (${created.status}). Link habits below to track progress.`);
             await loadGoals();
             setProgressSummary(null);
+            setDetailTab('habits');
             setSelectedGoalId(created.goal_id);
         } catch (err) {
             setError(extractApiError(err, 'Could not create goal.'));
@@ -336,85 +296,15 @@ export function GoalsManager() {
         }
     };
 
-    const handleAddCriterion = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!selectedGoalId || !critName.trim() || !critUnit.trim()) return;
-        const numericTarget = parseFloat(critTarget);
-        if (isNaN(numericTarget) || numericTarget <= 0) {
-            setError('Target value must be greater than 0.');
-            return;
-        }
-
-        setSubmitting(true);
-        setError(null);
-        try {
-            await createGoalCriterion(selectedGoalId, {
-                criterion_name: critName.trim(),
-                measurement_type: critType,
-                target_value: numericTarget,
-                measurement_unit: critUnit.trim(),
-                is_mandatory: critMandatory,
-            });
-            setCritName('');
-            setCritTarget('1');
-            setBanner('Criterion added to goal.');
-            await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
-        } catch (err) {
-            setError(extractApiError(err, 'Failed to add criterion.'));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleUpdateCriterionTarget = async (criterion: GoalCriterion) => {
-        if (!selectedGoalId) return;
-        const parsed = parseFloat(editCritTarget);
-        if (isNaN(parsed) || parsed <= 0) {
-            setError('Target value must be greater than 0.');
-            return;
-        }
-        setSubmitting(true);
-        setError(null);
-        try {
-            await updateGoalCriterion(selectedGoalId, criterion.criterion_id, {
-                target_value: parsed,
-                reason: editCritReason.trim() || 'Target updated via UI',
-            });
-            setEditingCritId(null);
-            setEditCritReason('');
-            setBanner('Criterion target updated and logged to audit history.');
-            await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
-        } catch (err) {
-            setError(extractApiError(err, 'Failed to update criterion.'));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleDeactivateCriterion = async (criterionId: number) => {
-        if (!selectedGoalId) return;
-        setSubmitting(true);
-        setError(null);
-        try {
-            await deactivateGoalCriterion(selectedGoalId, criterionId, 'Deactivated from Goals UI');
-            setBanner('Criterion deactivated.');
-            await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
-        } catch (err) {
-            setError(extractApiError(err, 'Failed to deactivate criterion.'));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleLinkHabitToParentGoal = async () => {
+    const handleLinkHabitToGoal = async () => {
         if (!selectedGoalId || !selectedParentHabitId) return;
         setSubmitting(true);
         setError(null);
         try {
             await linkHabitToGoal(selectedGoalId, Number(selectedParentHabitId));
             setSelectedParentHabitId('');
-            setBanner('Habit linked to goal.');
-            await loadGoalWorkspace(selectedGoalId);
+            setBanner('Habit linked to goal. Marking it Done on your Dashboard will automatically advance goal progress.');
+            await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
         } catch (err) {
             setError(extractApiError(err, 'Failed to link habit to goal.'));
         } finally {
@@ -422,50 +312,16 @@ export function GoalsManager() {
         }
     };
 
-    const handleUnlinkHabitFromParentGoal = async (habitId: number) => {
+    const handleUnlinkHabitFromGoal = async (habitId: number) => {
         if (!selectedGoalId) return;
         setSubmitting(true);
         setError(null);
         try {
             await unlinkHabitFromGoal(selectedGoalId, habitId);
-            setBanner('Habit unlinked from goal (and cascaded to criteria).');
-            await loadGoalWorkspace(selectedGoalId);
+            setBanner('Habit unlinked from goal.');
+            await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
         } catch (err) {
             setError(extractApiError(err, 'Failed to unlink habit.'));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleLinkHabitToCriterion = async (criterionId: number) => {
-        if (!selectedGoalId) return;
-        const habitIdStr = selectedCritHabitMap[criterionId];
-        if (!habitIdStr) return;
-
-        setSubmitting(true);
-        setError(null);
-        try {
-            await linkHabitToCriterion(selectedGoalId, criterionId, Number(habitIdStr));
-            setSelectedCritHabitMap((prev) => ({ ...prev, [criterionId]: '' }));
-            setBanner('Habit linked to criterion.');
-            await loadGoalWorkspace(selectedGoalId);
-        } catch (err) {
-            setError(extractApiError(err, 'Failed to link habit to criterion.'));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleUnlinkHabitFromCriterion = async (criterionId: number, habitId: number) => {
-        if (!selectedGoalId) return;
-        setSubmitting(true);
-        setError(null);
-        try {
-            await unlinkHabitFromCriterion(selectedGoalId, criterionId, habitId);
-            setBanner('Habit unlinked from criterion.');
-            await loadGoalWorkspace(selectedGoalId);
-        } catch (err) {
-            setError(extractApiError(err, 'Failed to unlink habit from criterion.'));
         } finally {
             setSubmitting(false);
         }
@@ -487,7 +343,7 @@ export function GoalsManager() {
                         Goals & Milestones
                     </h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Connect daily habits to measurable targets and track automatic completion.
+                        Link your daily habits directly to goals and track automatic progress when you complete them.
                     </p>
                 </div>
                 <div className="flex items-center gap-2.5">
@@ -672,7 +528,7 @@ export function GoalsManager() {
                 <div className="bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-10 text-center">
                     <p className="text-gray-700 dark:text-gray-300 font-medium">No goals found</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Create a goal and attach measurable criteria and daily habits to track progress automatically.
+                        Create a goal and link your daily habits to track progress automatically.
                     </p>
                 </div>
             ) : (
@@ -685,6 +541,7 @@ export function GoalsManager() {
                                 onClick={() => {
                                     if (selectedGoalId !== goal.goal_id) {
                                         setProgressSummary(null);
+                                        setDetailTab('habits');
                                     }
                                     setSelectedGoalId(goal.goal_id);
                                     setEditingGoal(false);
@@ -715,7 +572,7 @@ export function GoalsManager() {
 
                                 <div className="mt-4">
                                     <div className="flex justify-between text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                                        <span>Overall Progress</span>
+                                        <span>Habit Adherence</span>
                                         <span>{goal.progress_percentage.toFixed(1)}%</span>
                                     </div>
                                     <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -917,10 +774,9 @@ export function GoalsManager() {
                     <div className="flex flex-wrap border-b border-gray-200 dark:border-gray-700 gap-2 sm:gap-4 text-sm">
                         {(
                             [
-                                ['criteria', `Criteria (${progressSummary?.criteria_progress.length ?? 0})`],
                                 ['habits', `Linked Habits (${activeParentLinks.length})`],
-                                ['progress', `Progress Log (${progressSummary?.records_count ?? 0})`],
-                                ['history', 'Audit History'],
+                                ['progress', `Completed Logs (${progressSummary?.records_count ?? 0})`],
+                                ['history', 'Status History'],
                             ] as const
                         ).map(([tabKey, label]) => (
                             <button
@@ -943,286 +799,7 @@ export function GoalsManager() {
                         </div>
                     ) : (
                         <>
-                            {/* TAB 1: CRITERIA */}
-                            {detailTab === 'criteria' && (
-                                <div className="space-y-5">
-                                    {isGoalEditable(activeGoal.status) && (
-                                        <form
-                                            onSubmit={handleAddCriterion}
-                                            className="grid grid-cols-1 sm:grid-cols-6 gap-2.5 p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700"
-                                        >
-                                            <input
-                                                type="text"
-                                                required
-                                                value={critName}
-                                                onChange={(e) => setCritName(e.target.value)}
-                                                placeholder="Criterion name (e.g., Deep Work)"
-                                                className="sm:col-span-2 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
-                                            />
-                                            <select
-                                                value={critType}
-                                                onChange={(e) => setCritType(e.target.value as MeasurementType)}
-                                                className="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
-                                            >
-                                                <option value="Count">Count</option>
-                                                <option value="Duration">Duration</option>
-                                                <option value="Quantity">Quantity</option>
-                                            </select>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                min="0.01"
-                                                required
-                                                value={critTarget}
-                                                onChange={(e) => setCritTarget(e.target.value)}
-                                                placeholder="Target"
-                                                className="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
-                                            />
-                                            <input
-                                                type="text"
-                                                required
-                                                value={critUnit}
-                                                onChange={(e) => setCritUnit(e.target.value)}
-                                                placeholder="Unit (sessions)"
-                                                className="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
-                                            />
-                                            <div className="flex items-center justify-between gap-2">
-                                                <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={critMandatory}
-                                                        onChange={(e) => setCritMandatory(e.target.checked)}
-                                                    />
-                                                    Mandatory
-                                                </label>
-                                                <button
-                                                    type="submit"
-                                                    disabled={submitting}
-                                                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium"
-                                                >
-                                                    Add
-                                                </button>
-                                            </div>
-                                        </form>
-                                    )}
-
-                                    {(progressSummary?.criteria_progress ?? []).length === 0 ? (
-                                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                                            No criteria defined yet. Add at least one mandatory criterion to track completion.
-                                        </p>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            {progressSummary?.criteria_progress.map((crit) => {
-                                                const linkedToCrit = criterionHabitsMap[crit.criterion_id] ?? [];
-                                                const eligibleToLink = activeParentLinks.filter(
-                                                    (pl) => !linkedToCrit.some((cl) => cl.habit_id === pl.habit_id)
-                                                );
-
-                                                return (
-                                                    <div
-                                                        key={crit.criterion_id}
-                                                        className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3"
-                                                    >
-                                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                                            <div>
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                    <span className="font-semibold text-sm text-gray-900 dark:text-white">
-                                                                        {crit.criterion_name}
-                                                                    </span>
-                                                                    <span
-                                                                        className={`px-2 py-0.5 rounded text-[11px] font-medium ${crit.is_mandatory
-                                                                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
-                                                                            : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                                                                            }`}
-                                                                    >
-                                                                        {crit.is_mandatory ? 'Mandatory' : 'Optional'}
-                                                                    </span>
-                                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                                        ({crit.measurement_type} • {crit.status})
-                                                                    </span>
-                                                                </div>
-                                                                <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
-                                                                    Earned: <strong>{crit.earned_amount}</strong> /{' '}
-                                                                    <strong>{crit.target_value}</strong> {crit.measurement_unit} (
-                                                                    {crit.completion_percentage.toFixed(1)}%)
-                                                                </p>
-                                                            </div>
-
-                                                            {isGoalEditable(activeGoal.status) && crit.status !== 'Inactive' && (
-                                                                <div className="flex items-center gap-2">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setEditingCritId(crit.criterion_id);
-                                                                            setEditCritTarget(String(crit.target_value));
-                                                                            setEditCritReason('');
-                                                                        }}
-                                                                        className="px-2.5 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
-                                                                    >
-                                                                        Edit Target
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleDeactivateCriterion(crit.criterion_id)}
-                                                                        className="px-2.5 py-1 text-xs rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
-                                                                    >
-                                                                        Deactivate
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Progress Bar */}
-                                                        <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                                            <div
-                                                                className="h-full bg-emerald-500 transition-all duration-300"
-                                                                style={{ width: `${Math.min(100, crit.completion_percentage)}%` }}
-                                                            />
-                                                        </div>
-
-                                                        {/* Inline Target Editor */}
-                                                        {editingCritId === crit.criterion_id && (
-                                                            <div className="flex flex-wrap items-center gap-2 pt-1">
-                                                                <input
-                                                                    type="number"
-                                                                    step="0.01"
-                                                                    min="0.01"
-                                                                    value={editCritTarget}
-                                                                    onChange={(e) => setEditCritTarget(e.target.value)}
-                                                                    className="w-28 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs"
-                                                                />
-                                                                <input
-                                                                    type="text"
-                                                                    value={editCritReason}
-                                                                    onChange={(e) => setEditCritReason(e.target.value)}
-                                                                    placeholder="Reason for target adjustment"
-                                                                    className="flex-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs"
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleUpdateCriterionTarget(crit)}
-                                                                    className="px-3 py-1 rounded bg-indigo-600 text-white text-xs"
-                                                                >
-                                                                    Save
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setEditingCritId(null)}
-                                                                    className="px-2.5 py-1 rounded text-xs text-gray-500"
-                                                                >
-                                                                    Cancel
-                                                                </button>
-                                                            </div>
-                                                        )}
-
-                                                        {/* Criterion-Level Feeding Habits Panel */}
-                                                        <div className="mt-3 p-3.5 rounded-xl bg-indigo-50/75 dark:bg-indigo-950/35 border border-indigo-200 dark:border-indigo-800/80 space-y-3">
-                                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
-                                                                        Feeding Habits
-                                                                    </span>
-                                                                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-100 dark:bg-indigo-900/70 text-indigo-700 dark:text-indigo-200">
-                                                                        {linkedToCrit.length} linked
-                                                                    </span>
-                                                                </div>
-
-                                                                {isGoalEditable(activeGoal.status) &&
-                                                                    crit.status === 'Active' &&
-                                                                    activeParentLinks.length === 0 && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setDetailTab('habits')}
-                                                                            className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:underline text-left sm:text-right"
-                                                                        >
-                                                                            Step 1: Link a habit under Linked Habits →
-                                                                        </button>
-                                                                    )}
-                                                            </div>
-
-                                                            {/* Currently Linked Feeding Habits */}
-                                                            <div className="flex flex-wrap items-center gap-2">
-                                                                {linkedToCrit.length === 0 ? (
-                                                                    <span className="text-xs text-gray-600 dark:text-gray-300">
-                                                                        {activeParentLinks.length === 0
-                                                                            ? 'No habits attached to this goal yet.'
-                                                                            : 'No feeding habit selected yet — choose one from the dropdown below.'}
-                                                                    </span>
-                                                                ) : (
-                                                                    linkedToCrit.map((cl) => (
-                                                                        <span
-                                                                            key={cl.goal_criterion_habits_id}
-                                                                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white dark:bg-gray-800 border border-indigo-300 dark:border-indigo-700 text-indigo-800 dark:text-indigo-200 text-xs font-semibold shadow-2xs"
-                                                                        >
-                                                                            {cl.habit_name || `Habit #${cl.habit_id}`}
-                                                                            {isGoalEditable(activeGoal.status) && (
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() =>
-                                                                                        handleUnlinkHabitFromCriterion(
-                                                                                            crit.criterion_id,
-                                                                                            cl.habit_id
-                                                                                        )
-                                                                                    }
-                                                                                    className="ml-1 text-indigo-500 hover:text-red-600 font-bold text-sm leading-none"
-                                                                                    title="Unlink from criterion"
-                                                                                >
-                                                                                    ×
-                                                                                </button>
-                                                                            )}
-                                                                        </span>
-                                                                    ))
-                                                                )}
-                                                            </div>
-
-                                                            {/* Prominent Habit Selector Dropdown */}
-                                                            {isGoalEditable(activeGoal.status) && crit.status === 'Active' && (
-                                                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-                                                                    <select
-                                                                        aria-label={`Select feeding habit for ${crit.criterion_name}`}
-                                                                        value={selectedCritHabitMap[crit.criterion_id] || ''}
-                                                                        onChange={(e) =>
-                                                                            setSelectedCritHabitMap((prev) => ({
-                                                                                ...prev,
-                                                                                [crit.criterion_id]: e.target.value,
-                                                                            }))
-                                                                        }
-                                                                        disabled={eligibleToLink.length === 0}
-                                                                        className="w-full sm:flex-1 px-3.5 py-2 rounded-xl border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-800 text-sm font-medium text-gray-900 dark:text-white shadow-2xs focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/30 disabled:opacity-60"
-                                                                    >
-                                                                        <option value="">
-                                                                            {eligibleToLink.length > 0
-                                                                                ? 'Select a linked goal habit to feed this criterion...'
-                                                                                : activeParentLinks.length === 0
-                                                                                    ? 'No goal habits available yet (link one in Linked Habits tab first)'
-                                                                                    : 'All goal habits are already linked to this criterion'}
-                                                                        </option>
-                                                                        {eligibleToLink.map((hl) => (
-                                                                            <option key={hl.habit_id} value={hl.habit_id}>
-                                                                                {hl.habit_name || `Habit #${hl.habit_id}`}
-                                                                            </option>
-                                                                        ))}
-                                                                    </select>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleLinkHabitToCriterion(crit.criterion_id)}
-                                                                        disabled={!selectedCritHabitMap[crit.criterion_id] || submitting}
-                                                                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-2xs transition-colors disabled:opacity-50 shrink-0"
-                                                                    >
-                                                                        + Link Habit
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* TAB 2: PARENT GOAL HABIT LINKS */}
+                            {/* TAB 1: LINKED HABITS */}
                             {detailTab === 'habits' && (
                                 <div className="space-y-4">
                                     {isGoalEditable(activeGoal.status) && (
@@ -1246,11 +823,11 @@ export function GoalsManager() {
                                             </select>
                                             <button
                                                 type="button"
-                                                onClick={handleLinkHabitToParentGoal}
+                                                onClick={handleLinkHabitToGoal}
                                                 disabled={!selectedParentHabitId || submitting}
                                                 className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50 shrink-0"
                                             >
-                                                + Link Habit to Goal
+                                                + Link Habit
                                             </button>
                                         </div>
                                     )}
@@ -1261,7 +838,7 @@ export function GoalsManager() {
                                         </h4>
                                         {activeParentLinks.length === 0 ? (
                                             <p className="text-sm text-gray-500 dark:text-gray-400">
-                                                No habits linked to this goal yet. Link a habit here first before attaching it to criteria.
+                                                No habits linked to this goal yet. Select a habit above so its completions count toward this goal.
                                             </p>
                                         ) : (
                                             activeParentLinks.map((link) => (
@@ -1274,13 +851,13 @@ export function GoalsManager() {
                                                             {link.habit_name || `Habit #${link.habit_id}`}
                                                         </p>
                                                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                            Linked {link.linked_at} by {link.linked_by_type}
+                                                            Linked {link.linked_at}
                                                         </p>
                                                     </div>
                                                     {isGoalEditable(activeGoal.status) && (
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleUnlinkHabitFromParentGoal(link.habit_id)}
+                                                            onClick={() => handleUnlinkHabitFromGoal(link.habit_id)}
                                                             className="px-3 py-1 text-xs font-medium rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                                                         >
                                                             Unlink
@@ -1294,7 +871,7 @@ export function GoalsManager() {
                                     {historicalParentLinks.length > 0 && (
                                         <div className="space-y-2 pt-3 border-t border-gray-200 dark:border-gray-700">
                                             <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                                                Historical / Unlinked Habits
+                                                Previously Linked Habits
                                             </h4>
                                             {historicalParentLinks.map((link) => (
                                                 <div
@@ -1302,9 +879,7 @@ export function GoalsManager() {
                                                     className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400"
                                                 >
                                                     <span>{link.habit_name || `Habit #${link.habit_id}`}</span>
-                                                    <span>
-                                                        Unlinked {link.unlinked_at} ({link.unlinked_by_type})
-                                                    </span>
+                                                    <span>Unlinked {link.unlinked_at}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -1312,12 +887,12 @@ export function GoalsManager() {
                                 </div>
                             )}
 
-                            {/* TAB 3: PROGRESS RECORDS */}
+                            {/* TAB 2: COMPLETED HABIT LOGS */}
                             {detailTab === 'progress' && (
                                 <div className="space-y-2.5">
                                     {(progressSummary?.progress_records ?? []).length === 0 ? (
                                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                                            No progress recorded yet. Complete linked habit occurrences on your Dashboard to earn automatic progress.
+                                            No completed sessions recorded yet. Mark a linked habit as <strong>Done</strong> on your Dashboard to record progress here.
                                         </p>
                                     ) : (
                                         progressSummary?.progress_records.map((rec) => (
@@ -1330,11 +905,11 @@ export function GoalsManager() {
                                                         {rec.criterion_name}
                                                     </p>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                        Occurrence #{rec.habit_occurrence_id} • {rec.recorded_at}
+                                                        Completed • {rec.recorded_at}
                                                     </p>
                                                 </div>
-                                                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                                    +{rec.contribution_amount}
+                                                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                                                    Done
                                                 </span>
                                             </div>
                                         ))
@@ -1342,67 +917,35 @@ export function GoalsManager() {
                                 </div>
                             )}
 
-                            {/* TAB 4: AUDIT HISTORY */}
+                            {/* TAB 3: STATUS HISTORY */}
                             {detailTab === 'history' && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-2.5">
-                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                                            Status Transitions
-                                        </h4>
-                                        {statusHistory.length === 0 ? (
-                                            <p className="text-xs text-gray-500">No status history found.</p>
-                                        ) : (
-                                            statusHistory.map((h) => (
-                                                <div
-                                                    key={h.history_id}
-                                                    className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 text-xs space-y-1"
-                                                >
-                                                    <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200">
-                                                        <span>
-                                                            {h.old_status ?? 'Created'} → {h.new_status}
-                                                        </span>
-                                                        <span className="text-indigo-600 dark:text-indigo-400">
-                                                            {h.changed_by_type}
-                                                        </span>
-                                                    </div>
-                                                    {h.reason && (
-                                                        <p className="text-gray-600 dark:text-gray-300">{h.reason}</p>
-                                                    )}
-                                                    <p className="text-gray-400">{h.changed_at}</p>
+                                <div className="space-y-2.5">
+                                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                        Status Transitions
+                                    </h4>
+                                    {statusHistory.length === 0 ? (
+                                        <p className="text-xs text-gray-500">No status history found.</p>
+                                    ) : (
+                                        statusHistory.map((h) => (
+                                            <div
+                                                key={h.history_id}
+                                                className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 text-xs space-y-1"
+                                            >
+                                                <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200">
+                                                    <span>
+                                                        {h.old_status ?? 'Created'} → {h.new_status}
+                                                    </span>
+                                                    <span className="text-indigo-600 dark:text-indigo-400">
+                                                        {h.changed_by_type}
+                                                    </span>
                                                 </div>
-                                            ))
-                                        )}
-                                    </div>
-
-                                    <div className="space-y-2.5">
-                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                                            Criteria Modifications
-                                        </h4>
-                                        {criteriaHistory.length === 0 ? (
-                                            <p className="text-xs text-gray-500">No criteria modifications logged.</p>
-                                        ) : (
-                                            criteriaHistory.map((ch) => (
-                                                <div
-                                                    key={ch.history_id}
-                                                    className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 text-xs space-y-1"
-                                                >
-                                                    <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200">
-                                                        <span>
-                                                            {ch.criterion_name} ({ch.field_name})
-                                                        </span>
-                                                        <span className="text-indigo-600 dark:text-indigo-400">
-                                                            {ch.changed_by_type}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-gray-600 dark:text-gray-300">
-                                                        {ch.old_value ?? '—'} → {ch.new_value ?? '—'}
-                                                    </p>
-                                                    {ch.reason && <p className="text-gray-500 italic">{ch.reason}</p>}
-                                                    <p className="text-gray-400">{ch.changed_at}</p>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
+                                                {h.reason && (
+                                                    <p className="text-gray-600 dark:text-gray-300">{h.reason}</p>
+                                                )}
+                                                <p className="text-gray-400">{h.changed_at}</p>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
                             )}
                         </>

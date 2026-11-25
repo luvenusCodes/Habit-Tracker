@@ -1,5 +1,5 @@
 import type { Habit, Occurrence, Category, User, AuthResponse } from '../types';
-import type { HabitAnalyticsResponse } from '../types'
+import type { HabitAnalyticsResponse } from '../types';
 import type { HabitSchedule, CreateSchedulePayload } from '../types';
 import type { OccurrenceHistoryItem } from '../types';
 
@@ -52,7 +52,7 @@ export const getHabits = async (): Promise<Habit[]> => {
         throw new Error('Failed to fetch habits');
     }
 
-    const data = await response.json()
+    const data = await response.json();
     return Array.isArray(data) ? data : (data.habits ?? []);
 };
 
@@ -87,7 +87,7 @@ export const updateHabit = async (habitId: number, habitData: HabitUpdatePayload
 
 export const deleteHabit = async (habitId: number): Promise<void> => {
     const response = await fetch(`${API_BASE_URL}/habits/${habitId}`, {
-        method: `DELETE`,
+        method: 'DELETE',
         headers: getAuthHeaders(),
     });
 
@@ -126,7 +126,7 @@ export const createCategory = async (categoryData: CategoryCreatePayload): Promi
 
     const data = await response.json();
     return data.category ?? data;
-}
+};
 
 export const updateCategory = async (
     categoryId: number,
@@ -180,7 +180,6 @@ export const getOccurrencesByDate = async (dateStr?: string): Promise<Occurrence
         throw new Error('Failed to fetch occurrences');
     }
 
-
     return response.json();
 };
 
@@ -224,7 +223,7 @@ export const getScoreSummary = async (dateStr?: string): Promise<ScoreSummaryRes
     });
 
     if (!response.ok) {
-        throw new Error(`Failed to fetch score summary`);
+        throw new Error('Failed to fetch score summary');
     }
 
     return response.json();
@@ -255,9 +254,11 @@ export const registerUser = async (data: RegisterPayload): Promise<any> => {
     }
 
     return response.json();
-}
+};
 
-export const LoginUserJson = async (data: LoginPayload): Promise<AuthResponse & { message: string; user_id: number; username: string }> => {
+export const LoginUserJson = async (
+    data: LoginPayload
+): Promise<AuthResponse & { message: string; user_id: number; username: string }> => {
     const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -374,6 +375,22 @@ export const getHabitAnalytics = async (days: number = 30): Promise<HabitAnalyti
     return response.json();
 };
 
+export class ScheduleCollisionError extends Error {
+    conflicts: { habit_name: string; window: string }[];
+    dayOfWeek: string;
+
+    constructor(
+        message: string,
+        dayOfWeek: string,
+        conflicts: { habit_name: string; window: string }[]
+    ) {
+        super(message);
+        this.name = 'ScheduleCollisionError';
+        this.dayOfWeek = dayOfWeek;
+        this.conflicts = conflicts;
+    }
+}
+
 export const getHabitSchedules = async (habitId: number): Promise<HabitSchedule[]> => {
     const response = await fetch(`${API_BASE_URL}/schedules/habit/${habitId}`, {
         method: 'GET',
@@ -387,7 +404,9 @@ export const getHabitSchedules = async (habitId: number): Promise<HabitSchedule[
     return data.schedules || [];
 };
 
-export const createHabitSchedule = async (payload: CreateSchedulePayload) => {
+export const createHabitSchedule = async (
+    payload: CreateSchedulePayload & { allow_overlap?: boolean }
+) => {
     const response = await fetch(`${API_BASE_URL}/schedules/`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -395,7 +414,18 @@ export const createHabitSchedule = async (payload: CreateSchedulePayload) => {
     });
     if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to create habit schedule');
+        if (response.status === 409 && errData?.detail?.code === 'SCHEDULE_COLLISION') {
+            throw new ScheduleCollisionError(
+                errData.detail.message,
+                errData.detail.day_of_week,
+                errData.detail.conflicts || []
+            );
+        }
+        const detailMsg =
+            typeof errData.detail === 'string'
+                ? errData.detail
+                : 'Failed to create habit schedule';
+        throw new Error(detailMsg);
     }
     return response.json();
 };
@@ -413,7 +443,7 @@ export const updateHabitScheduleStatus = async (
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.detail || 'Failed to update schedule status');
     }
-    return response.json()
+    return response.json();
 };
 
 export const deleteHabitSchedule = async (scheduleId: number) => {
@@ -441,7 +471,9 @@ export const carryForwardOccurrence = async (occurrenceId: number, targetDate?: 
     return response.json();
 };
 
-export const getOccurrenceHistory = async (occurrenceId: number): Promise<OccurrenceHistoryItem[]> => {
+export const getOccurrenceHistory = async (
+    occurrenceId: number
+): Promise<OccurrenceHistoryItem[]> => {
     const response = await fetch(`${API_BASE_URL}/occurrences/${occurrenceId}/history`, {
         method: 'GET',
         headers: getAuthHeaders(),

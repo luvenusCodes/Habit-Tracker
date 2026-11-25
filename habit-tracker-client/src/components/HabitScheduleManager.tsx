@@ -42,6 +42,12 @@ const formatTimeShort = (timeStr?: string | null) => {
     return timeStr;
 };
 
+const isOvernightSlot = (startStr?: string | null, endStr?: string | null): boolean => {
+    const start = formatTimeShort(startStr);
+    const end = formatTimeShort(endStr);
+    return Boolean(start && end < start);
+};
+
 export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManagerProps) => {
     const [schedules, setSchedules] = useState<HabitSchedule[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
@@ -191,13 +197,20 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                                     <span className="font-semibold text-gray-800 dark:text-gray-100 w-20">
                                         {sch.day_of_week}
                                     </span>
-                                    <span className="text-gray-600 dark:text-gray-300">
-                                        {formatTimeShort(sch.start_time)}
-                                        {sch.end_time
-                                            ? ` – ${formatTimeShort(sch.end_time)}`
-                                            : sch.duration_minutes
-                                                ? ` (${sch.duration_minutes} min)`
-                                                : ''}
+                                    <span className="text-gray-600 dark:text-gray-300 flex items-center gap-1.5">
+                                        <span>
+                                            {formatTimeShort(sch.start_time)}
+                                            {sch.end_time
+                                                ? ` – ${formatTimeShort(sch.end_time)}`
+                                                : sch.duration_minutes
+                                                    ? ` (${sch.duration_minutes} min)`
+                                                    : ''}
+                                        </span>
+                                        {isOvernightSlot(sch.start_time, sch.end_time) && (
+                                            <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                                Next day
+                                            </span>
+                                        )}
                                     </span>
                                 </div>
 
@@ -207,8 +220,8 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                                         disabled={isBusy}
                                         onClick={() => handleToggleStatus(sch)}
                                         className={`px-2 py-0.5 rounded-md font-medium transition-colors ${isActive
-                                                ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
+                                            ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
                                             }`}
                                     >
                                         {sch.status}
@@ -268,8 +281,8 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                                     type="button"
                                     onClick={() => toggleDaySelection(day)}
                                     className={`py-1.5 text-[11px] font-semibold rounded-lg transition-colors ${active
-                                            ? 'bg-indigo-600 text-white shadow-xs'
-                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                        ? 'bg-indigo-600 text-white shadow-xs'
+                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                                         }`}
                                 >
                                     {SHORT_DAY_LABELS[day]}
@@ -334,6 +347,13 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                         </div>
                     )}
                 </div>
+
+                {/* ADD THIS RIGHT HERE: */}
+                {timingMode === 'end_time' && isOvernightSlot(startTime, endTime) && (
+                    <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5">
+                        🌙 Overnight schedule - ends at {endTime} the next day.
+                    </p>
+                )}
 
                 <div className="flex justify-end">
                     <button

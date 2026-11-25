@@ -72,6 +72,10 @@ export const changeGoalStatus = async (
     return response.data.goal ?? response.data;
 };
 
+export const deleteGoal = async (goalId: number): Promise<void> => {
+    await axios.delete(`${API_BASE_URL}/goals/${goalId}`, getAuthConfig());
+};
+
 export const runGoalMaintenance = async () => {
     const response = await axios.post(`${API_BASE_URL}/goals/maintenance/run`, {}, getAuthConfig());
     return response.data.result ?? response.data;

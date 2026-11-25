@@ -11,6 +11,7 @@ from storage.goals_storage import (
     # [PHASE 4 IMPORTS]
     create_goal_criterion,
     deactivate_goal_criterion,
+    delete_goal,
     # [PHASE 7 IMPORTS]
     get_all_goal_criteria_history,
     get_criterion_modification_history,
@@ -207,6 +208,21 @@ def update_goal_endpoint(
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
 
+@router.delete("/{goal_id}")
+def delete_goal_endpoint(
+    goal_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        result = delete_goal(
+            goal_id=goal_id,
+            user_id=current_user["user_id"],
+        )
+        return {"message": f"Goal '{result['goal_name']} deleted successfully.", "result": result}
+    except GoalRuleError as err:
+        raise HTTPException(status_code=err.status_code, detail=err.message)
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
 
 @router.patch("/{goal_id}/status")
 def update_goal_status_endpoint(

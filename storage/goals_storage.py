@@ -639,6 +639,66 @@ def change_goal_status(
         if connection and connection.is_connected():
             connection.close()
 
+def delete_goal(goal_id: int, user_id: int) -> Dict[str, Any]:
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT goal_id, goal_name, status
+            FROM goals
+            WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
+            FOR UPDATE
+            """,
+            (goal_id, user_id),
+        )
+        existing = cursor.fetchone()
+        if not existing:
+            raise GoalRuleError("Goal not found or unauthorized.", status_code=404)
+
+        _auto_unlink_terminal_goal_habits(cursor, goal_id, user_id)
+
+        cursor.execute(
+            """
+            UPDATE goal_criteria
+            SET deleted_at = CURRENT_TIMESTAMP
+            WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
+            """,
+            (goal_id, user_id),
+        )
+
+        cursor.execute(
+            """
+            UPDATE goals
+            SET deleted_at = CURRENT_TIMESTAMP
+            WHERE goal_id = %s AND user_id = %s AND deleted_at IS NULL
+            """,
+            (goal_id, user_id),
+        )
+
+        connection.commit()
+        return {
+            "goal_id": existing["goal_id"],
+            "goal_name": existing["goal_name"],
+            "deleted": True,
+        }
+
+    except GoalRuleError:
+        if connection:
+            connection.rollback()
+        raise
+    except mysql.connector.Error as err:
+        if connection:
+            connection.rollback()
+        raise GoalRuleError(f"Database error: {err}", status_code=400)
+    finally:
+        if cursor:
+            cursor.close()
+        if connection and connection.is_connected():
+            connection.close()
 
 def _serialize_criterion(row: Dict[str, Any]) -> Dict[str, Any]:
     target = float(row["target_value"])

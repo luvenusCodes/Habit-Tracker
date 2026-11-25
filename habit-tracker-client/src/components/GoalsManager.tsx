@@ -14,6 +14,7 @@ import {
     fetchGoals,
     createGoal,
     updateGoal,
+    deleteGoal,
     changeGoalStatus,
     runGoalMaintenance,
     createGoalCriterion,
@@ -235,6 +236,7 @@ export function GoalsManager() {
             setNewGoalNotes('');
             setBanner(`Goal "${created.goal_name}" created (${created.status}).`);
             await loadGoals();
+            setProgressSummary(null);
             setSelectedGoalId(created.goal_id);
         } catch (err) {
             setError(extractApiError(err, 'Could not create goal.'));
@@ -268,6 +270,30 @@ export function GoalsManager() {
             await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
         } catch (err) {
             setError(extractApiError(err, 'Failed to update goal.'));
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handleDeleteGoal = async (goal: Goal) => {
+        const confirmed = window.confirm(
+            `Delete "${goal.goal_name}"? This will remove the goal and unlink its habits.`
+        );
+        if (!confirmed) return;
+
+        setSubmitting(true);
+        setError(null);
+        try {
+            await deleteGoal(goal.goal_id);
+            if (selectedGoalId === goal.goal_id) {
+                setSelectedGoalId(null);
+                setProgressSummary(null);
+                setEditingGoal(false);
+            }
+            setBanner(`Goal "${goal.goal_name}" deleted.`);
+            await loadGoals();
+        } catch (err) {
+            setError(extractApiError(err, 'Failed to delete goal.'));
         } finally {
             setSubmitting(false);
         }
@@ -445,7 +471,10 @@ export function GoalsManager() {
         }
     };
 
-    const activeGoal = progressSummary?.goal ?? goals.find((g) => g.goal_id === selectedGoalId) ?? null;
+    const activeGoal =
+        selectedGoalId !== null
+            ? progressSummary?.goal ?? goals.find((g) => g.goal_id === selectedGoalId) ?? null
+            : null;
     const activeParentLinks = goalHabits.filter((l) => l.is_active);
     const historicalParentLinks = goalHabits.filter((l) => !l.is_active);
 
@@ -519,6 +548,8 @@ export function GoalsManager() {
                         onClick={() => {
                             setStatusFilter(st);
                             setSelectedGoalId(null);
+                            setProgressSummary(null);
+                            setEditingGoal(false);
                         }}
                         className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${statusFilter === st
                             ? 'bg-indigo-600 text-white'
@@ -652,6 +683,9 @@ export function GoalsManager() {
                             <div
                                 key={goal.goal_id}
                                 onClick={() => {
+                                    if (selectedGoalId !== goal.goal_id) {
+                                        setProgressSummary(null);
+                                    }
                                     setSelectedGoalId(goal.goal_id);
                                     setEditingGoal(false);
                                 }}
@@ -746,7 +780,19 @@ export function GoalsManager() {
                             )}
                             <button
                                 type="button"
-                                onClick={() => setSelectedGoalId(null)}
+                                disabled={submitting}
+                                onClick={() => handleDeleteGoal(activeGoal)}
+                                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 dark:border-red-800/80 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
+                            >
+                                Delete
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedGoalId(null);
+                                    setProgressSummary(null);
+                                    setEditingGoal(false);
+                                }}
                                 className="px-3 py-1.5 text-xs font-medium rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400"
                             >
                                 Close

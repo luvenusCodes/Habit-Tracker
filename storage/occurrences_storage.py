@@ -50,10 +50,11 @@ def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] =
                 c.category_name
             FROM habit_schedule s
             JOIN habits h ON s.habit_id = h.habit_id
-            JOIN categories c ON h.category_id = c.category_id
+            LEFT JOIN categories c ON h.category_id = c.category_id
             WHERE h.user_id = %s
                 AND s.status = 'Active'
                 AND h.status = 'Active'
+                AND h.deleted_at IS NULL
                 AND s.day_of_week = %s
         """
         cursor.execute(query, (user_id, day_of_week_str))
@@ -75,6 +76,8 @@ def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] =
             start_dt = datetime.combine(gen_date, start_t)
             if end_t:
                 scheduled_end_at = datetime.combine(gen_date, end_t)
+                if scheduled_end_at <= start_dt:
+                    scheduled_end_at += timedelta(days=1)
             elif sch["duration_minutes"]:
                 scheduled_end_at = start_dt + timedelta(minutes=sch["duration_minutes"])
             else:
@@ -96,7 +99,7 @@ def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] =
                     sch["schedule_id"],
                     sch["habit_name"],
                     sch["priority"],
-                    sch["category_name"],
+                    sch["category_name"] or "General",
                     sch["measurement_type"],
                     sch["target_value"],
                     gen_date,
@@ -349,7 +352,10 @@ def carry_forward_occurrence_in_db(
 
         start_dt = datetime.combine(new_date, start_t)
         if end_t:
-            time_diff = datetime.combine(old_date, end_t) - datetime.combine(old_date, start_t)
+            end_dt_old = datetime.combine(old_date, end_t)
+            if end_dt_old <= datetime.combine(old_date, start_t):
+                end_dt_old += timedelta(days=1)
+            time_diff = end_dt_old - datetime.combine(old_date, start_t)
             scheduled_end_at = start_dt + time_diff
         elif old_occ["duration_minutes"]:
             scheduled_end_at = start_dt + timedelta(minutes=old_occ["duration_minutes"])

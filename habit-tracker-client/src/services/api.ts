@@ -191,7 +191,8 @@ export const generateOccurrencesForDate = async (targetDate?: string): Promise<a
     });
 
     if (!response.ok) {
-        throw new Error('Failed to generate occurrences');
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to generate occurrences');
     }
 
     return response.json();
@@ -209,7 +210,8 @@ export const updateOccurrenceStatus = async (
     });
 
     if (!response.ok) {
-        throw new Error('Failed to update occurrence status');
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to update occurrence status');
     }
 
     return response.json();

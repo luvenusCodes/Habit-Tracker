@@ -7,7 +7,7 @@ from storage.connection import get_db_connection
 from routers import auth, habits, categories, users, schedules, occurrences, goals
 
 import logging
-from logging import FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 load_dotenv(override=False)

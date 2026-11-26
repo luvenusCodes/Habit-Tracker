@@ -12,6 +12,7 @@ import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { initThemeListener, applyTheme, type ThemePreference } from './utils/theme';
 import { fetchUserSettings } from './services/settingsService';
 import { CategoryManager } from './components/CategoryManager';
+import { AuthLayout } from './components/AuthLayout';
 import './App.css';
 
 type AuthView = 'login' | 'register' | 'verify-email' | 'forgot-password';
@@ -22,6 +23,10 @@ function App() {
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string>('');
   const [username, setUsername] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(() => {
+    const userKey = localStorage.getItem('username') || 'default';
+    return localStorage.getItem(`habit_avatar_${userKey}`);
+  });
 
   useEffect(() => {
     const cleanup = initThemeListener();
@@ -30,6 +35,8 @@ function App() {
     if (token) {
       setIsAuthenticated(true);
       if (storedUsername) setUsername(storedUsername);
+      const userKey = storedUsername || 'default';
+      setAvatarUrl(localStorage.getItem(`habit_avatar_${userKey}`));
 
       fetchUserSettings()
         .then((settings) => {
@@ -50,59 +57,52 @@ function App() {
     localStorage.removeItem('username');
     setIsAuthenticated(false);
     setUsername(null);
+    setAvatarUrl(null);
     setActiveTab('dashboard');
   };
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-10 px-4 transition-colors">
-        <header className="max-w-md mx-auto text-center mb-8">
-          <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
-            Habit Tracker
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Build consistency, one day at a time.
-          </p>
-        </header>
-        <main className="max-w-md mx-auto">
-          {currentView === 'login' && (
-            <Login
-              onLoginSuccess={() => {
-                setIsAuthenticated(true);
-                setUsername(localStorage.getItem('username'));
-              }}
-              onSwitchToRegister={() => setCurrentView('register')}
-              onSwitchToForgotPassword={() => setCurrentView('forgot-password')}
-              onSwitchToVerifyEmail={() => {
-                setPendingVerificationEmail('');
-                setCurrentView('verify-email');
-              }}
-            />
-          )}
-          {currentView === 'register' && (
-            <Register
-              onRegisterSuccess={(registeredEmail) => {
-                setPendingVerificationEmail(registeredEmail);
-                setCurrentView('verify-email');
-              }}
-              onSwitchToLogin={() => setCurrentView('login')}
-            />
-          )}
-          {currentView === 'verify-email' && (
-            <VerifyEmail
-              initialEmail={pendingVerificationEmail}
-              onVerified={() => setCurrentView('login')}
-              onBackToLogin={() => setCurrentView('login')}
-            />
-          )}
-          {currentView === 'forgot-password' && (
-            <ForgotPassword
-              onResetSuccess={() => setCurrentView('login')}
-              onBackToLogin={() => setCurrentView('login')}
-            />
-          )}
-        </main>
-      </div>
+      <AuthLayout>
+        {currentView === 'login' && (
+          <Login
+            onLoginSuccess={() => {
+              const loggedInUser = localStorage.getItem('username');
+              setIsAuthenticated(true);
+              setUsername(loggedInUser);
+              setAvatarUrl(localStorage.getItem(`habit_avatar_${loggedInUser || 'default'}`));
+            }}
+            onSwitchToRegister={() => setCurrentView('register')}
+            onSwitchToForgotPassword={() => setCurrentView('forgot-password')}
+            onSwitchToVerifyEmail={() => {
+              setPendingVerificationEmail('');
+              setCurrentView('verify-email');
+            }}
+          />
+        )}
+        {currentView === 'register' && (
+          <Register
+            onRegisterSuccess={(registeredEmail) => {
+              setPendingVerificationEmail(registeredEmail);
+              setCurrentView('verify-email');
+            }}
+            onSwitchToLogin={() => setCurrentView('login')}
+          />
+        )}
+        {currentView === 'verify-email' && (
+          <VerifyEmail
+            initialEmail={pendingVerificationEmail}
+            onVerified={() => setCurrentView('login')}
+            onBackToLogin={() => setCurrentView('login')}
+          />
+        )}
+        {currentView === 'forgot-password' && (
+          <ForgotPassword
+            onResetSuccess={() => setCurrentView('login')}
+            onBackToLogin={() => setCurrentView('login')}
+          />
+        )}
+      </AuthLayout>
     );
   }
 
@@ -111,6 +111,7 @@ function App() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       username={username}
+      avatarUrl={avatarUrl}
       onLogout={handleLogout}
     >
       {activeTab === 'dashboard' && (
@@ -133,7 +134,12 @@ function App() {
         <AnalyticsDashboard />
       )}
       {activeTab === 'settings' && (
-        <SettingsManager />
+        <SettingsManager
+          avatarUrl={avatarUrl}
+          onAvatarChange={setAvatarUrl}
+          onUsernameChange={(newUsername) => setUsername(newUsername)}
+          onLogout={handleLogout}
+        />
       )}
     </AppLayout>
   );

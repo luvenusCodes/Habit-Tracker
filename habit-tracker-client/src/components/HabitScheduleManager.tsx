@@ -256,7 +256,7 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                     No recurring days configured yet. Add days below so daily occurrences generate automatically.
                 </p>
             ) : (
-                <ul className="space-y-1.5">
+                <ul className="space-y-1.5 max-h-48 overflow-y-auto pr-1 overscroll-contain">
                     {schedules.map((sch) => {
                         const isBusy = busyScheduleId === sch.schedule_id;
                         const isActive = sch.status === 'Active';

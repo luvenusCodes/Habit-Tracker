@@ -7,7 +7,11 @@ interface VerifyEmailProps {
     onBackToLogin: () => void;
 }
 
-export const VerifyEmail = ({ initialEmail = '', onVerified, onBackToLogin }: VerifyEmailProps) => {
+export const VerifyEmail = ({
+    initialEmail = '',
+    onVerified,
+    onBackToLogin,
+}: VerifyEmailProps) => {
     const [email, setEmail] = useState(initialEmail);
     const [otpCode, setOtpCode] = useState('');
     const [loading, setLoading] = useState(false);
@@ -32,7 +36,7 @@ export const VerifyEmail = ({ initialEmail = '', onVerified, onBackToLogin }: Ve
 
         try {
             const res = await verifyEmailOtp({ email: email.trim(), otp_code: otpCode.trim() });
-            setInfoMsg(res.message || 'Email verified successfully! Redirecting to login...');
+            setInfoMsg(res.message || 'Email verified successfully! Redirecting to sign in...');
             setTimeout(() => onVerified(), 1500);
         } catch (err) {
             setError((err as Error).message);
@@ -62,31 +66,34 @@ export const VerifyEmail = ({ initialEmail = '', onVerified, onBackToLogin }: Ve
     };
 
     return (
-        <div className="w-full max-w-md mx-auto p-5 sm:p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
-            <div className="text-center mb-6 sm:mb-8">
-                <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
+        <div className="w-full">
+            <div className="mb-6">
+                <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold bg-indigo-50 dark:bg-amber-400/15 text-indigo-600 dark:text-amber-300 mb-3">
+                    Email Verification
+                </span>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
                     Verify Your Email
                 </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
                     Enter the 6-digit code sent to your inbox (expires in 10 minutes)
                 </p>
             </div>
 
             {error && (
-                <div className="p-3 mb-4 text-sm text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl text-center">
+                <div className="p-3 mb-4 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800/60 rounded-2xl text-center">
                     {error}
                 </div>
             )}
 
             {infoMsg && (
-                <div className="p-3 mb-4 text-sm text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-center">
+                <div className="p-3 mb-4 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl text-center">
                     {infoMsg}
                 </div>
             )}
 
             <form onSubmit={handleVerify} className="space-y-4">
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1.5">
                         Email Address
                     </label>
                     <input
@@ -96,12 +103,12 @@ export const VerifyEmail = ({ initialEmail = '', onVerified, onBackToLogin }: Ve
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="name@example.com"
                         required
-                        className="w-full px-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-base sm:text-sm text-gray-900 dark:text-white dark:placeholder-gray-400"
+                        className="w-full px-4 py-2.5 bg-gray-50/70 dark:bg-[#1e2028] border border-gray-200 dark:border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-amber-400 text-sm text-gray-900 dark:text-white dark:placeholder-slate-500"
                     />
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1.5">
                         6-Digit Verification Code
                     </label>
                     <input
@@ -112,25 +119,25 @@ export const VerifyEmail = ({ initialEmail = '', onVerified, onBackToLogin }: Ve
                         onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
                         placeholder="123456"
                         required
-                        className="w-full px-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-center tracking-[0.35em] font-mono text-lg text-gray-900 dark:text-white dark:placeholder-gray-400"
+                        className="w-full px-4 py-3 bg-gray-50/70 dark:bg-[#1e2028] border border-gray-200 dark:border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-amber-400 text-center tracking-[0.4em] font-mono text-xl font-bold text-gray-900 dark:text-white dark:placeholder-slate-500"
                     />
                 </div>
 
                 <button
                     type="submit"
                     disabled={loading || otpCode.length !== 6}
-                    className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition-colors shadow-sm disabled:opacity-50 text-sm mt-2"
+                    className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 dark:bg-amber-400 dark:hover:bg-amber-300 text-white dark:text-gray-950 font-bold text-sm transition-colors shadow-sm disabled:opacity-50 mt-1"
                 >
                     {loading ? 'Verifying...' : 'Verify Email'}
                 </button>
             </form>
 
-            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 text-sm">
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200/80 dark:border-white/10 text-xs">
                 <button
                     type="button"
                     disabled={resending || cooldown > 0}
                     onClick={handleResend}
-                    className="text-indigo-600 dark:text-indigo-400 font-medium hover:underline disabled:opacity-50 disabled:no-underline"
+                    className="text-indigo-600 dark:text-amber-400 font-semibold hover:underline disabled:opacity-50 disabled:no-underline"
                 >
                     {resending
                         ? 'Sending...'
@@ -142,9 +149,9 @@ export const VerifyEmail = ({ initialEmail = '', onVerified, onBackToLogin }: Ve
                 <button
                     type="button"
                     onClick={onBackToLogin}
-                    className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    className="font-medium text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-white transition-colors"
                 >
-                    Back to Log in
+                    ← Back to Sign In
                 </button>
             </div>
         </div>

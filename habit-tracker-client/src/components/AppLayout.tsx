@@ -7,6 +7,7 @@ interface AppLayoutProps {
     activeTab: NavTab;
     onTabChange: (tab: NavTab) => void;
     username: string | null;
+    avatarUrl?: string | null;
     onLogout: () => void;
 }
 
@@ -15,6 +16,7 @@ export default function AppLayout({
     activeTab,
     onTabChange,
     username,
+    avatarUrl,
     onLogout,
 }: AppLayoutProps) {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -81,12 +83,12 @@ export default function AppLayout({
     ];
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col md:flex-row transition-colors">
+        <div className="min-h-screen md:h-screen md:overflow-hidden bg-gray-50 dark:bg-gray-900 flex flex-col md:flex-row transition-colors">
 
             {/* DESKTOP SIDEBAR */}
             <aside
                 className={`hidden md:flex ${isCollapsed ? 'md:w-20' : 'md:w-64'
-                    } relative flex-col bg-white dark:bg-[#1e1f26] text-gray-700 dark:text-slate-200 border-r border-gray-200 dark:border-white/10 p-4 shrink-0 transition-all duration-300`}
+                    } relative md:h-screen md:sticky md:top-0 overflow-y-auto oversroll-contain flex-col bg-white dark:bg-[#1e1f26] text-gray-700 dark:text-slate-200 border-r border-gray-200 dark:border-white/10 p-4 shrink-0 transition-all duration-300`}
             >
                 {/* Edge Collapse Toggle */}
                 <button
@@ -107,9 +109,17 @@ export default function AppLayout({
 
                 {/* User Greeting Header */}
                 <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3 px-1'} mb-7`}>
-                    <div className="w-10 h-10 rounded-full bg-linear-to-br from-indigo-500 to-purple-600 text-white font-bold text-sm flex items-center justify-center shrink-0 ring-2 ring-indigo-500/20 dark:ring-white/15 shadow-xs">
-                        {(username?.[0] || 'H').toUpperCase()}
-                    </div>
+                    {avatarUrl ? (
+                        <img
+                            src={avatarUrl}
+                            alt={username || 'User avatar'}
+                            className="w-10 h-10 rounded-full object-cover shrink-0 ring-2 ring-indigo-500/25 dark:ring-emerald-400/35 shadow-xs"
+                        />
+                    ) : (
+                        <div className="w-10 h-10 rounded-full bg-linear-to-br from indigo-500 to-purple-600 text-white font-bold text-sm flex items-center justify-center shrink-0 ring-2 ring-indigo-500/20 dark:ring-white/15 shadow-xs">
+                            {(username?.[0] || 'H').toUpperCase()}
+                        </div>
+                    )}
                     {!isCollapsed && (
                         <div className="min-w-0">
                             <p className="text-[11px] font-medium text-gray-400 dark:text-slate-400">
@@ -205,9 +215,17 @@ export default function AppLayout({
             {/* MOBILE TOP NAVBAR */}
             <header className="md:hidden flex items-center justify-between bg-white dark:bg-[#1e1f26] border-b border-gray-200 dark:border-white/10 px-4 py-3 sticky top-0 z-20 transition-colors">
                 <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-linear-to-br from-indigo-500 to-purple-600 text-white font-bold text-xs flex items-center justify-center">
-                        {(username?.[0] || 'H').toUpperCase()}
-                    </div>
+                    {avatarUrl ? (
+                        <img
+                            src={avatarUrl}
+                            alt={username || 'User avatar'}
+                            className="w-8 h-8 rounded-full object-cover ring-1 ring-indigo-500/30 dark:ring-emerald-400/35"
+                        />
+                    ) : (
+                        <div className="w-8 h-8 rounded-full bg-linear-to-br from-indigo-500 to-purple-600 text-white font-bold text-xs flext items-center justify-center">
+                            {(username?.[0] || 'H').toUpperCase()}
+                        </div>
+                    )}
                     <div>
                         <span className="text-base font-bold text-gray-900 dark:text-white">
                             Habit Tracker
@@ -267,7 +285,7 @@ export default function AppLayout({
             )}
 
             {/* MAIN CONTENT AREA */}
-            <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+            <main className="flex-1 md:h-screen p-4 sm:p-6 lg:p-8 overflow-y-auto">
                 <div className="max-w-4xl mx-auto">
                     {children}
                 </div>

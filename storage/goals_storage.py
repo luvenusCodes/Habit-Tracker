@@ -250,7 +250,7 @@ def _sync_goal_lifecycle_states(cursor, user_id: Optional[int] = None, goal_id: 
             _evaluate_goal_and_criteria_completion(cursor, goal_id, user_id)
         else:
             cursor.execute(
-                "SELECT goal_id FROM goals WHERE user_id = %s AND status = 'Active' AND delted_at IS NULL",
+                "SELECT goal_id FROM goals WHERE user_id = %s AND status = 'Active' AND deleted_at IS NULL",
                 (user_id,),
             )
             for row in cursor.fetchall():

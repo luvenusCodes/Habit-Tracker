@@ -34,6 +34,9 @@ from storage.goals_storage import (
     update_goal_criterion,
     update_goal_details,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/goals", tags=["Goals"])
 
@@ -122,8 +125,11 @@ def run_goal_maintenance_endpoint(
         }
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 # ==============================================================================
 # [PHASE 3: GOAL MANAGEMENT ENDPOINTS]
@@ -145,8 +151,11 @@ def create_goal_endpoint(
         return {"message": "Goal created successfully.", "goal": goal}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.get("/")
@@ -159,8 +168,11 @@ def list_goals_endpoint(
         return {"count": len(goals), "goals": goals}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.get("/{goal_id}")
@@ -177,8 +189,11 @@ def get_goal_endpoint(
         raise
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.patch("/{goal_id}")
@@ -205,8 +220,11 @@ def update_goal_endpoint(
         return {"message": "Goal updated successfully.", "goal": goal}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 @router.delete("/{goal_id}")
 def delete_goal_endpoint(
@@ -221,8 +239,11 @@ def delete_goal_endpoint(
         return {"message": f"Goal '{result['goal_name']} deleted successfully.", "result": result}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 @router.patch("/{goal_id}/status")
 def update_goal_status_endpoint(
@@ -240,8 +261,11 @@ def update_goal_status_endpoint(
         return {"message": f"Goal status updated to '{payload.status}'.", "goal": goal}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 # ==============================================================================
@@ -267,8 +291,11 @@ def create_criterion_endpoint(
         return {"message": "Goal criterion created successfully.", "criterion": criterion}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.get("/{goal_id}/criteria")
@@ -286,8 +313,11 @@ def list_criteria_endpoint(
         return {"goal_id": goal_id, "count": len(criteria), "criteria": criteria}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.get("/{goal_id}/criteria/{criterion_id}")
@@ -309,8 +339,11 @@ def get_criterion_endpoint(
         raise
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.patch("/{goal_id}/criteria/{criterion_id}")
@@ -337,8 +370,11 @@ def update_criterion_endpoint(
         return {"message": "Goal criterion updated successfully.", "criterion": criterion}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.delete("/{goal_id}/criteria/{criterion_id}")
@@ -358,8 +394,11 @@ def deactivate_criterion_endpoint(
         return {"message": "Goal criterion deactivated successfully.", "criterion": criterion}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 # ==============================================================================
@@ -381,8 +420,11 @@ def link_habit_to_goal_endpoint(
         return {"message": "Habit linked to goal successfully.", "relationship": link}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.get("/{goal_id}/habits")
@@ -400,8 +442,11 @@ def list_goal_habits_endpoint(
         return {"goal_id": goal_id, "count": len(links), "relationships": links}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.delete("/{goal_id}/habits/{habit_id}")
@@ -420,8 +465,11 @@ def unlink_habit_from_goal_endpoint(
         return {"message": "Habit unlinked from goal successfully.", "relationship": link}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 # ==============================================================================
@@ -445,8 +493,11 @@ def link_habit_to_criterion_endpoint(
         return {"message": "Habit linked to criterion successfully.", "relationship": link}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.get("/{goal_id}/criteria/{criterion_id}/habits")
@@ -471,8 +522,11 @@ def list_criterion_habits_endpoint(
         }
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 
 @router.delete("/{goal_id}/criteria/{criterion_id}/habits/{habit_id}")
@@ -493,8 +547,11 @@ def unlink_habit_from_criterion_endpoint(
         return {"message": "Habit unlinked from criterion successfully.", "relationship": link}
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 # // [PHASE 6: GOAL PROGRESS & CONTRIBUTION RECORDS ENDPOINT]
 @router.get("/{goal_id}/progress")
@@ -510,8 +567,11 @@ def get_goal_progress_endpoint(
         return summary
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 # [PHASE 7: GOAL STATUS HISTORY & GOAL CRITERIA HISTORY AUDIT ENDPOINTS]
 @router.get("/{goal_id}/history")
@@ -531,8 +591,11 @@ def get_goal_status_history_endpoint(
         }
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 @router.get("/{goal_id}/criteria-history")
 def get_all_goal_criteria_history_endpoint(
@@ -549,8 +612,11 @@ def get_all_goal_criteria_history_endpoint(
         }
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")
 
 @router.get("/{goal_id}/criteria/{criterion_id}/history")
 def get_criterion_history_endpoint(
@@ -572,5 +638,8 @@ def get_criterion_history_endpoint(
         }
     except GoalRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {err}")
+    except Exception:
+        logger.exception("unexpected server error in goals endpoint")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Something went wrong on our end. Please try again in a moment")

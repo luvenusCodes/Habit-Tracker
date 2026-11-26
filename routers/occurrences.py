@@ -18,6 +18,10 @@ from storage.occurrences_storage import (
     update_occurrence_status_in_db,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 ALGORITHM = "HS256"
@@ -52,9 +56,8 @@ def generate_occurrences(payload: GenerateOccurrencesRequest, user_id: int = Dep
         return generate_occurrences_for_date(user_id=user_id, target_date_str=payload.target_date)
     except HTTPException:
         raise
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=f"Database error: {err}")
-
+    except Exception:
+        logger.exception("Unexpected se") 
 
 # Get User Occurrences for a given date
 @router.get("/")

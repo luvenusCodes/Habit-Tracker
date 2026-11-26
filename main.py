@@ -6,6 +6,10 @@ from storage.connection import get_db_connection
 
 from routers import auth, habits, categories, users, schedules, occurrences, goals
 
+import logging
+from logging import FastAPI, Request
+from fastapi.responses import JSONResponse
+
 load_dotenv(override=False)
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
@@ -22,6 +26,21 @@ app = FastAPI(
     redoc_url=None if ENVIRONMENT == "production" else "/redoc",
 )
 
+logger = logging.getLogger(__name__)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "Unhandled server exception on %s %s",
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Something went wrong on our end😞. Please try again in a moment. "
+        },
+    )
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):

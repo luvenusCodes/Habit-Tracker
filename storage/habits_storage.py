@@ -207,26 +207,52 @@ def delete_habit_in_mysql(habit_id, user_id):
             return False
 
         cursor = connection.cursor()
+        
         #soft delete: update deleted_at instead of wiping the row
-        query = """
-                UPDATE HABITS
-                SET deleted_at = CURRENT_TIMESTAMP
-                WHERE habit_id = %s AND user_id = %s AND deleted_at IS NULL
-                """
-        cursor.execute(query, (habit_id, user_id))
+        cursor.execute(
+            """
+            UPDATE habits
+            SET status = 'Deleted'. deleted_at = CURRENT_TIMESTAMP
+            WHERE habit_id = %s AND user_id = %s AND deleted_at IS NULL
+            """,
+            (habit_id, user_id),
+        )
+        if cursor.rowxount == 0:
+            return False
+
+        # Deactivate all schedules belonging to this habit
+        cursor.execute(
+            """
+            UPDATE habit_schedule
+            SET status = 'Inactive'
+            WHERE habit_id = %s AND status = 'Active'
+            """,
+            (habit_id,),
+        )
+
+        # Remove all pending occurrences from today onward so they vanish from the dashboard
+        cursor.execute(
+            """
+            DELETE FROM habit_occurrences
+            WHERE habit_id = %s
+                AND user_id = %s
+                AND occurrence_date >= CURDATE()
+                AND status = 'Pending'
+            """,
+            (habit_id, user_id),
+        )
+
         connection.commit()
-        #Returns true if a row was actually updated
-        return cursor.rowcount > 0
+        return True
 
     except mysql.connector.Error as err:
+        if connection:
+            connection.rollback()
         print(f"MySQL Error occurred: {err}")
         return False
-    
+
     finally:
         if cursor:
             cursor.close()
         if connection and connection.is_connected():
             connection.close()
-
-if __name__ == "__main__":
-    test_connection()

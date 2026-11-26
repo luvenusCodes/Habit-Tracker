@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Dict, List, Literal, Optional, Tuple
 
 import mysql.connector
@@ -10,6 +10,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from storage.connection import get_db_connection
+from storage.occurrences_storage import generate_occurrences_for_date
 
 load_dotenv()
 
@@ -131,7 +132,7 @@ def create_schedule(schedule_data: ScheduleCreate, user_id: int = Depends(get_cu
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         # Verify habit ownership
         cursor.execute(
@@ -229,6 +230,14 @@ def create_schedule(schedule_data: ScheduleCreate, user_id: int = Depends(get_cu
         connection.commit()
         new_schedule_id = cursor.lastrowid
 
+        # Auto-generate today's occurrence immediately if this active schedule matches today
+        today = date.today()
+        if schedule_data.status == "Active" and schedule_data.day_of_week == today.strftime("%A"):
+            try:
+                generate_occurrences_for_date(user_id=user_id, target_date_str=str(today))
+            except Exception:
+                logger.exception("Auto-generation after schedule creation failed")
+
         return {
             "message": "Schedule created successfully.",
             "schedule": {
@@ -266,7 +275,7 @@ def get_schedules_for_habit(habit_id: int, user_id: int = Depends(get_current_us
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         cursor.execute(
             "SELECT habit_id FROM habits WHERE habit_id = %s AND user_id = %s AND deleted_at IS NULL",
@@ -330,25 +339,46 @@ def update_schedule_status(
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         cursor.execute(
             """
-            SELECT s.schedule_id
+            SELECT s.schedule_id, s.day_of_week
             FROM habit_schedule s
             JOIN habits h ON s.habit_id = h.habit_id
             WHERE s.schedule_id = %s AND h.user_id = %s AND h.deleted_at IS NULL
             """,
             (schedule_id, user_id),
         )
-        if not cursor.fetchone():
+        schedule_row = cursor.fetchone()
+        if not schedule_row:
             raise HTTPException(status_code=404, detail="Schedule not found or unauthorized.")
 
         cursor.execute(
             "UPDATE habit_schedule SET status = %s WHERE schedule_id = %s",
             (status_data.status, schedule_id),
         )
+
+        today = date.today()
+        if status_data.status == "Inactive":
+            cursor.execute(
+                """
+                DELETE FROM habit_occurrences
+                WHERE schedule_id = %s
+                  AND user_id = %s
+                  AND occurrence_date >= %s
+                  AND status = 'Pending'
+                """,
+                (schedule_id, user_id, today),
+            )
+
         connection.commit()
+
+        if status_data.status == "Active" and schedule_row["day_of_week"] == today.strftime("%A"):
+            try:
+                generate_occurrences_for_date(user_id=user_id, target_date_str=str(today))
+            except Exception:
+                logger.exception("Auto-generation after schedule activation failed")
 
         return {
             "message": f"Schedule status updated to '{status_data.status}'.",
@@ -380,7 +410,7 @@ def delete_schedule(schedule_id: int, user_id: int = Depends(get_current_user_id
     cursor = None
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(dictionary=True, buffered=True)
 
         cursor.execute(
             """
@@ -393,6 +423,18 @@ def delete_schedule(schedule_id: int, user_id: int = Depends(get_current_user_id
         )
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Schedule not found or unauthorized.")
+
+        # Remove pending future/today occurrences first so they vanish from the dashboard
+        cursor.execute(
+            """
+            DELETE FROM habit_occurrences
+            WHERE schedule_id = %s
+              AND user_id = %s
+              AND occurrence_date >= %s
+              AND status = 'Pending'
+            """,
+            (schedule_id, user_id, date.today()),
+        )
 
         cursor.execute(
             "SELECT COUNT(*) AS cnt FROM habit_occurrences WHERE schedule_id = %s",

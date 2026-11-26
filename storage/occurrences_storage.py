@@ -145,7 +145,10 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
                    o.start_time, o.end_time, o.status, o.base_score, o.final_score
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
-            WHERE h.user_id = %s AND o.occurrence_date = %s
+            WHERE h.user_id = %s 
+                AND o.occurrence_date = %s
+                AND h.deleted_at IS NULL
+                AND h.status != 'Deleted'
         """
         cursor.execute(safe_query, (user_id, target_date))
         occurrences = cursor.fetchall()

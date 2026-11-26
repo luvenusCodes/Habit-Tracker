@@ -159,6 +159,14 @@ export const deleteCategory = async (categoryId: number): Promise<void> => {
 export interface OccurrenceResponse {
     date: string;
     occurrences: Occurrence[];
+    auto_missed?: {
+        count: number;
+        items: {
+            occurrence_id: number;
+            habit_name_snapshot: string;
+            occurrence_date: string;
+        }[];
+    };
 }
 
 export interface ScoreSummaryResponse {
@@ -460,11 +468,21 @@ export const deleteHabitSchedule = async (scheduleId: number) => {
     return response.json();
 };
 
-export const carryForwardOccurrence = async (occurrenceId: number, targetDate?: string) => {
+export interface CarryForwardPayload {
+    target_date?: string;
+    start_time?: string;
+    end_time?: string | null;
+    duration_minutes?: number | null;
+}
+
+export const carryForwardOccurrence = async (
+    occurrenceId: number,
+    payload: CarryForwardPayload = {}
+) => {
     const response = await fetch(`${API_BASE_URL}/occurrences/${occurrenceId}/carry-forward`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(targetDate ? { target_date: targetDate } : {}),
+        body: JSON.stringify(payload),
     });
     if (!response.ok) {
         const errData = await response.json().catch(() => ({}));

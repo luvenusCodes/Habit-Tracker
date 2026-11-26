@@ -95,6 +95,9 @@ def update_occurrence_status(
 # Carry-Forward Endpoint
 class CarryForwardRequest(BaseModel):
     target_date: Optional[str] = None  # Optional target date for the rolled-over task (defaults to tomorrow)
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    duration_minutes: Optional[int] = None
 
 
 @router.post("/{occurrence_id}/carry-forward", status_code=status.HTTP_201_CREATED)
@@ -108,6 +111,9 @@ def carry_forward_occurrence(
             occurrence_id=occurrence_id,
             user_id=user_id,
             target_date_str=payload.target_date,
+            start_time_str=payload.start_time,
+            end_time_str=payload.end_time,
+            duration_minutes=payload.duration_minutes,
         )
     except OccurrenceRuleError as err:
         raise HTTPException(status_code=err.status_code, detail=err.message)

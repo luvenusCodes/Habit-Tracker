@@ -33,6 +33,11 @@ const SHORT_DAY_LABELS: Record<DayOfWeek, string> = {
     Sunday: 'Sun',
 };
 
+const getTodayDayOfWeek = (): DayOfWeek => {
+    const jsDay = new Date().getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    return DAYS_OF_WEEK[jsDay === 0 ? 6 : jsDay - 1];
+};
+
 const formatTimeShort = (timeStr?: string | null) => {
     if (!timeStr) return '';
     const parts = timeStr.split(':');
@@ -42,10 +47,25 @@ const formatTimeShort = (timeStr?: string | null) => {
     return timeStr;
 };
 
-const isOvernightSlot = (startStr?: string | null, endStr?: string | null): boolean => {
+const isOvernightSlot = (
+    startStr?: string | null,
+    endStr?: string | null,
+    durationMinutes?: number | null
+): boolean => {
     const start = formatTimeShort(startStr);
+    if (!start) return false;
+
     const end = formatTimeShort(endStr);
-    return Boolean(start && end < start);
+    if (end) {
+        return end < start;
+    }
+
+    if (durationMinutes && durationMinutes > 0) {
+        const [h, m] = start.split(':').map(Number);
+        return h * 60 + m + durationMinutes >= 1440;
+    }
+
+    return false;
 };
 
 export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManagerProps) => {
@@ -57,8 +77,8 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
     const [infoBanner, setInfoBanner] = useState<string | null>(null);
     const [collisionMessage, setCollisionMessage] = useState<string | null>(null);
 
-    // Form states
-    const [selectedDays, setSelectedDays] = useState<DayOfWeek[]>(['Monday']);
+    // Form states — default highlighted day to today
+    const [selectedDays, setSelectedDays] = useState<DayOfWeek[]>(() => [getTodayDayOfWeek()]);
     const [startTime, setStartTime] = useState<string>('08:00');
     const [timingMode, setTimingMode] = useState<'duration' | 'end_time'>('duration');
     const [durationMinutes, setDurationMinutes] = useState<number>(30);
@@ -258,7 +278,7 @@ export const HabitScheduleManager = ({ habitId, habitName }: HabitScheduleManage
                                                     ? ` (${sch.duration_minutes} min)`
                                                     : ''}
                                         </span>
-                                        {isOvernightSlot(sch.start_time, sch.end_time) && (
+                                        {isOvernightSlot(sch.start_time, sch.end_time, sch.duration_minutes) && (
                                             <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                                                 Next day
                                             </span>

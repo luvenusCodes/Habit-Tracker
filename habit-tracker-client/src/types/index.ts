@@ -54,6 +54,9 @@ export interface Occurrence {
     final_score?: number;
     carry_forward_attempt?: number;
     created_at?: string;
+    duration_minutes?: number | null;
+    is_locked?: boolean;
+    status_recorded_at?: string | null;
 }
 
 export interface DailyTrendPoint {

@@ -115,7 +115,7 @@ function App() {
     >
       {activeTab === 'dashboard' && (
         <div className="space-y-8">
-          <OccurrenceTracker />
+          <OccurrenceTracker onNavigateToHabits={() => setActiveTab('habits')} />
         </div>
       )}
       {activeTab === 'habits' && (

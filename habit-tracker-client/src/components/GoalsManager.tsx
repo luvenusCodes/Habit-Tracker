@@ -408,7 +408,7 @@ export function GoalsManager() {
                             setEditingGoal(false);
                         }}
                         className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${statusFilter === st
-                            ? 'bg-indigo-600 text-white'
+                            ? 'bg-emerald-500 text-white'
                             : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
                             }`}
                     >
@@ -890,6 +890,9 @@ export function GoalsManager() {
                             {/* TAB 2: COMPLETED HABIT LOGS */}
                             {detailTab === 'progress' && (
                                 <div className="space-y-2.5">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        Only completed (<span className="font-semibold text-emerald-600 dark:text-emerald-400">Done</span>) sessioons count toward adherence; missed, skipped, and carried-over occurrences are excluded.
+                                    </p>
                                     {(progressSummary?.progress_records ?? []).length === 0 ? (
                                         <p className="text-sm text-gray-500 dark:text-gray-400">
                                             No completed sessions recorded yet. Mark a linked habit as <strong>Done</strong> on your Dashboard to record progress here.

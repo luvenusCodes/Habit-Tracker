@@ -21,6 +21,70 @@ def _to_time(val: Any):
         return (datetime.min + val).time()
     return val
 
+def _parse_time_str(val: Optional[str]):
+    if not val:
+        return None
+    parts = val.strip().split(":")
+    hour = int(parts[0])
+    minute = int(parts[1])
+    second = int(parts[2]) if len(parts) > 2 else 0
+    return datetime.min.replace(hour=hour, minute=minute, second=second).time()
+
+def _enforce_six_hour_lock(current_status: str, seconds_since_recorded: Optional[int]) -> None:
+    if current_status != "Pending" and seconds_since_recorded is not None and seconds_since_recorded >= 6 * 3600:
+        raise OccurrenceRuleError(
+            "This occurrence is locked because more than 6 hours have passed since its status was recorded.",
+            status_code=403,
+        )
+
+def _sweep_unattended_occurrences(cursor, connection, user_id: int) -> List[Dict[str, Any]]:
+    today_date = date.today()
+    cursor.execute(
+        """
+        SELECT o.occurrence_id, o.habit_name_snapshot, o.occurrence_date
+        FROM habit_occurrences o
+        JOIN habits h ON o.habit_id = h.habit_id
+        WHERE h.user_id = %s
+            AND o.occurrence_date < %s
+            AND o.status = 'Pending'
+            AND h.deleted_at IS NULL
+            AND h.status != 'Deleted'
+        """,
+        (user_id, today_date),
+    )
+    unattended_rows = cursor.fetchall()
+
+    swept_items: List[Dict[str, Any]] = []
+    if unattended_rows:
+        for row in unattended_rows:
+            cursor.execute(
+                """
+                UPDATE habit_occurrences
+                SET status = 'Not Done',
+                    final_score = 0.00,
+                    reason = 'Auto-marked Missed (unattended past date)',
+                    status_recorded_at = CURRENT_TIMESTAMP
+                WHERE occurrence_id = %s
+                """,
+                (row["occurrence_id"],),
+            )
+            cursor.execute(
+                """
+                INSERT INTO occurrence_status_history
+                    (occurrence_id, old_status, new_status, changed_by, changed_by_type, reason)
+                VALUES (%s, 'Pending', 'Not Done', %s, 'System', 'Auto-marked Missed (unattended past date)')
+                """,
+                (row["occurrence_id"], user_id),
+            )
+            swept_items.append(
+                {
+                    "occurrence_id": row["occurrence_id"],
+                    "habit_name_snapshot": row["habit_name_snapshot"],
+                    "occurrence_date": str(row["occurrence_date"]),
+                }
+            )
+        connection.commit()
+    return swept_items
 
 def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] = None) -> Dict[str, Any]:
     connection = None
@@ -139,13 +203,63 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
 
         target_date = date_str or str(date.today())
 
-        safe_query = """
-            SELECT o.occurrence_id, o.habit_id, o.schedule_id, o.habit_name_snapshot,
-                   o.priority_snapshot, o.category_snapshot, o.occurrence_date,
-                   o.start_time, o.end_time, o.status, o.base_score, o.final_score
+        today_date = date.today()
+        cursor.execute(
+            """
+            SELECT o.occurrence_id, o.habit_name_snapshot, o.occurrence_date
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
-            WHERE h.user_id = %s 
+            WHERE h.user_id = %s
+                AND o.occurrence_date < %s
+                AND o.status = 'Pending'
+                AND h.deleted_at IS NULL
+                AND h.status != 'Deleted'
+            """,
+            (user_id, today_date),
+        )
+        unattended_rows = cursor.fetchall()
+
+        swept_items = []
+        if unattended_rows:
+            for row in unattended_rows:
+                cursor.execute(
+                    """
+                    UPDATE habit_occurrences
+                    SET status = 'Not Done',
+                        final_score = 0.00,
+                        reason = 'Auto-marked Missed (unattended past date)',
+                        status_recorded_at = CURRENT_TIMESTAMP
+                    WHERE occurrence_id = %s
+                    """,
+                    (row["occurrence_id"],),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO occurrence_status_history
+                        (occurrence_id, old_status, new_status, changed_by, changed_by_type, reason)
+                    VALUES (%s, 'Pending', 'Not Done', %s, 'System', 'Auto-marked Missed (unattended past date)')
+                    """,
+                    (row["occurrence_id"], user_id),
+                )
+                swept_items.append(
+                    {
+                        "occurrence_id": row["occurrence_id"],
+                        "habit_name_snapshot": row["habit_name_snapshot"],
+                        "occurrence_date": str(row["occurrence_date"]),
+                    }
+                )
+            connection.commit()
+
+        safe_query = """
+            SELECT o.occurrence_id, o.habit_id, o.schedule_id, o.habit_name_snapshot,
+                    o.priority_snapshot, o.category_snapshot, o.occurrence_date,
+                    o.start_time, o.end_time, o.duration_minutes, o.status,
+                    o.base_score, o.final_score, o.carry_forward_attempt,
+                    o.original_occurrence_id, o.status_recorded_at,
+                    TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
+            FROM habit_occurrences o
+            JOIN habits h ON o.habit_id = h.habit_id
+            WHERE h.user_id = %s
                 AND o.occurrence_date = %s
                 AND h.deleted_at IS NULL
                 AND h.status != 'Deleted'
@@ -161,14 +275,32 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
             if occ.get("occurrence_date") is not None:
                 occ["occurrence_date"] = str(occ["occurrence_date"])
 
-        return {"date": target_date, "occurrences": occurrences}
+            sec = occ.pop("seconds_since_recorded", None)
+            occ["is_locked"] = bool(
+                occ["status"] != "Pending" and sec is not None and sec >= 6 * 3600
+            )
+            if occ.get("status_recorded_at") is not None:
+                occ["status_recorded_at"] = str(occ["status_recorded_at"])
+
+        return {
+            "date": target_date,
+            "occurrences": occurrences,
+            "auto_missed": {
+                "count": len(swept_items),
+                "items": swept_items,
+            },
+        }
+
+    except Exception:
+        if connection:
+            connection.rollback();
+        raise
 
     finally:
         if cursor:
             cursor.close()
         if connection and connection.is_connected():
             connection.close()
-
 
 def update_occurrence_status_in_db(
     occurrence_id: int,
@@ -183,7 +315,8 @@ def update_occurrence_status_in_db(
         cursor = connection.cursor(dictionary=True, buffered=True)
 
         auth_query = """
-            SELECT o.occurrence_id, o.status AS current_status, o.base_score, h.user_id
+            SELECT o.occurrence_id, o.status AS current_status, o.base_score, h.user_id,
+                    TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE o.occurrence_id = %s AND h.user_id = %s
@@ -196,6 +329,8 @@ def update_occurrence_status_in_db(
             raise OccurrenceRuleError("Occurrence not found or unauthorized.", status_code=404)
 
         old_status = occurrence["current_status"]
+
+        _enforce_six_hour_lock(old_status, occurrence.get("seconds_since_recorded"))
 
         valid_statuses = ["Pending", "Done", "Not Done", "Carried Over", "Incomplete", "Skipped", "Cancelled"]
         if new_status not in valid_statuses:
@@ -272,6 +407,9 @@ def carry_forward_occurrence_in_db(
     occurrence_id: int,
     user_id: int,
     target_date_str: Optional[str] = None,
+    start_time_str: Optional[str] = None,
+    end_time_str: Optional[str] = None,
+    duration_minutes: Optional[int] = None,
 ) -> Dict[str, Any]:
     connection = None
     cursor = None
@@ -280,7 +418,8 @@ def carry_forward_occurrence_in_db(
         cursor = connection.cursor(dictionary=True, buffered=True)
 
         fetch_query = """
-            SELECT o.*, h.user_id AS owner_user_id
+            SELECT o.*, h.user_id AS owner_user_id,
+                    TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE o.occurrence_id = %s AND h.user_id = %s
@@ -291,6 +430,8 @@ def carry_forward_occurrence_in_db(
 
         if not old_occ:
             raise OccurrenceRuleError("Occurrence not found or unauthorized.", status_code=404)
+
+        _enforce_six_hour_lock(old_occ["status"], old_occ.get("seconds_since_recorded"))
 
         if old_occ["status"] not in ["Pending", "Not Done", "Incomplete"]:
             raise OccurrenceRuleError(
@@ -350,18 +491,25 @@ def carry_forward_occurrence_in_db(
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Pending', 10.00, %s, %s)
         """
 
-        start_t = _to_time(old_occ["start_time"])
-        end_t = _to_time(old_occ["end_time"]) if old_occ["end_time"] is not None else None
+        start_t = _parse_time_str(start_time_str) if start_time_str else _to_time(old_occ["start_time"])
+
+        if end_time_str:
+            end_t = _parse_time_str(end_time_str)
+            dur_mins = None
+        elif duration_minutes is not None:
+            end_t = None
+            dur_mins = int(duration_minutes)
+        else:
+            end_t = _to_time(old_occ["end_time"]) if old_occ["end_time"] is not None else None
+            dur_mins = old_occ["duration_minutes"]
 
         start_dt = datetime.combine(new_date, start_t)
         if end_t:
-            end_dt_old = datetime.combine(old_date, end_t)
-            if end_dt_old <= datetime.combine(old_date, start_t):
-                end_dt_old += timedelta(days=1)
-            time_diff = end_dt_old - datetime.combine(old_date, start_t)
-            scheduled_end_at = start_dt + time_diff
-        elif old_occ["duration_minutes"]:
-            scheduled_end_at = start_dt + timedelta(minutes=old_occ["duration_minutes"])
+            scheduled_end_at = datetime.combine(new_date, end_t)
+            if scheduled_end_at <= start_dt:
+                scheduled_end_at += timedelta(days=1)
+        elif dur_mins:
+            scheduled_end_at = start_dt + timedelta(minutes=dur_mins)
         else:
             scheduled_end_at = start_dt + timedelta(minutes=30)
 
@@ -379,7 +527,7 @@ def carry_forward_occurrence_in_db(
                 new_date,
                 start_t,
                 end_t,
-                old_occ["duration_minutes"],
+                dur_mins,
                 scheduled_end_at,
                 new_attempts,
                 original_id,
@@ -506,6 +654,8 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True, buffered=True)
 
+        _sweep_unattended_occurrences(cursor, connection, user_id)
+
         today = date.today()
         start_date = today - timedelta(days=days - 1)
 
@@ -524,6 +674,7 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE h.user_id = %s
                 AND o.occurrence_date BETWEEN %s AND %s
+                AND o.status NOT IN ('Carried Over', 'Cancelled')
             ORDER BY o.occurrence_date ASC
         """
         cursor.execute(range_query, (user_id, start_date, today))
@@ -579,7 +730,9 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
             SELECT h.habit_id, h.habit_name, h.priority, c.category_name
             FROM habits h
             LEFT JOIN categories c ON h.category_id = c.category_id
-            WHERE h.user_id = %s AND h.status = 'Active'
+            WHERE h.user_id = %s
+              AND h.status = 'Active'
+              AND h.deleted_at IS NULL
             ORDER BY h.habit_name ASC
             """,
             (user_id,),
@@ -592,6 +745,7 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE h.user_id = %s
+                AND h.deleted_at IS NULL
                 AND o.occurrence_date <= %s
                 AND o.status IN ('Done', 'Not Done', 'Pending', 'Incomplete')
             ORDER BY o.habit_id ASC, o.occurrence_date ASC
@@ -680,7 +834,7 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
                 "completion_rate": completion_rate,
                 "score_efficiency": score_efficiency,
                 "total_earned_points": total_earned_points,
-                "total_current_streak": best_overall_streak,
+                "best_current_streak": best_overall_streak,
             },
             "daily_trend": daily_trend,
             "habit_streaks": habit_streaks,

@@ -243,6 +243,19 @@ def _expire_overdue_goals(cursor, user_id: Optional[int] = None, goal_id: Option
 
 def _sync_goal_lifecycle_states(cursor, user_id: Optional[int] = None, goal_id: Optional[int] = None) -> Dict[str, int]:
     activated = _activate_due_planned_goals(cursor, user_id=user_id, goal_id=goal_id)
+
+    # Evaluate Active goals for 100% completion before expiring overdue one
+    if user_id is not None:
+        if goal_id is not None:
+            _evaluate_goal_and_criteria_completion(cursor, goal_id, user_id)
+        else:
+            cursor.execute(
+                "SELECT goal_id FROM goals WHERE user_id = %s AND status = 'Active' AND delted_at IS NULL",
+                (user_id,),
+            )
+            for row in cursor.fetchall():
+                _evaluate_goal_and_criteria_completion(cursor, row["goal_id"], user_id)
+
     expired = _expire_overdue_goals(cursor, user_id=user_id, goal_id=goal_id)
     return {"activated_count": activated, "expired_count": expired}
 
@@ -300,7 +313,7 @@ def _compute_goal_progress_percentage(cursor, goal_id: int, user_id: int) -> flo
         WHERE hg.goal_id = %s
           AND hg.user_id = %s
           AND hg.deleted_at IS NULL
-          AND o.status NOT IN ('Cancelled', 'Carried Over')
+          AND o.status IN ('Done' , 'Pending')
           AND {" AND ".join(date_clauses)}
         """,
         tuple(params),
@@ -783,10 +796,11 @@ def _serialize_criterion(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -> None:
+def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -> bool:
     """
-    Re-evaluates goal completion when an end_date is reached and all scheduled
-    linked occurrences in the window have been completed (100%).
+    Re-evaluates goal completion when habit adherence reaches 100% on an
+    open-ended goal or a goal whose end_date has been reached.
+    Returns True if the goal transitioned to 'Completed'
     """
     cursor.execute(
         """
@@ -802,8 +816,11 @@ def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -
         return
 
     pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
+    if pct < 100.0:
+        return False
+
     end_date = goal_row.get("end_date")
-    if end_date is not None and end_date <= date.today() and pct >= 100.0:
+    if end_date is None or end_date <= date.today():
         cursor.execute(
             """
             UPDATE goals
@@ -822,6 +839,9 @@ def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -
                 (goal_id, user_id, "Goal completed with 100% habit adherence."),
             )
             _auto_unlink_terminal_goal_habits(cursor, goal_id, user_id)
+            return True
+    
+    return False
 
 
 def _fetch_criterion_with_progress(cursor, criterion_id: int, goal_id: int, user_id: int) -> Optional[Dict[str, Any]]:
@@ -1718,6 +1738,9 @@ def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) ->
         )
 
     return recorded_items
+
+    just_completed = _evaluate_goal_and_criteria_completion(cursor, g["goal_id"], user_id)
+    recorded_items[-1]["goal_completed"] = just_completed
 
 
 def remove_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) -> int:

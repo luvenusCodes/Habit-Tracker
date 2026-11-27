@@ -21,6 +21,7 @@ def _to_time(val: Any):
         return (datetime.min + val).time()
     return val
 
+
 def _parse_time_str(val: Optional[str]):
     if not val:
         return None
@@ -30,20 +31,26 @@ def _parse_time_str(val: Optional[str]):
     second = int(parts[2]) if len(parts) > 2 else 0
     return datetime.min.replace(hour=hour, minute=minute, second=second).time()
 
+
 def _enforce_six_hour_lock(current_status: str, seconds_since_recorded: Optional[int]) -> None:
-    if current_status != "Pending" and seconds_since_recorded is not None and seconds_since_recorded >= 6 * 3600:
+    if (
+        current_status != "Pending"
+        and seconds_since_recorded is not None
+        and seconds_since_recorded >= 6 * 3600
+    ):
         raise OccurrenceRuleError(
             "This occurrence is locked because more than 6 hours have passed since its status was recorded.",
             status_code=403,
         )
 
+
 def _find_unattended_overdue_occurrences(cursor, user_id: int) -> List[Dict[str, Any]]:
     """
-    Finds pending occurrences whose scheduled_end_at is strickly >= 24 hours (86400s) in the past:
+    Finds pending occurrences whose scheduled_end_at is strictly >= 24 hours (86400s) in the past.
     """
     cursor.execute(
         """
-        SELECT 
+        SELECT
             o.occurrence_id,
             o.habit_id,
             o.habit_name_snapshot,
@@ -80,7 +87,7 @@ def _find_unattended_overdue_occurrences(cursor, user_id: int) -> List[Dict[str,
                 "category_snapshot": row.get("category_snapshot") or "General",
                 "priority_snapshot": row.get("priority_snapshot") or "Medium",
                 "occurrence_date": str(row["occurrence_date"]),
-                "start_time": str(row["start_ime"]) if row.get("start_time") is not None else None,
+                "start_time": str(row["start_time"]) if row.get("start_time") is not None else None,
                 "end_time": str(row["end_time"]) if row.get("end_time") is not None else None,
                 "duration_minutes": row.get("duration_minutes"),
                 "scheduled_end_at": str(row["scheduled_end_at"]),
@@ -89,6 +96,7 @@ def _find_unattended_overdue_occurrences(cursor, user_id: int) -> List[Dict[str,
             }
         )
     return items
+
 
 def _sweep_unattended_occurrences(cursor, connection, user_id: int) -> List[Dict[str, Any]]:
     """
@@ -104,7 +112,7 @@ def _sweep_unattended_occurrences(cursor, connection, user_id: int) -> List[Dict
                     final_score = 0.00,
                     reason = 'Auto-skipped (unattended > 24h)',
                     status_recorded_at = CURRENT_TIMESTAMP
-                WHERE occurrence_id = %s 
+                WHERE occurrence_id = %s
                 """,
                 (item["occurrence_id"],),
             )
@@ -118,6 +126,7 @@ def _sweep_unattended_occurrences(cursor, connection, user_id: int) -> List[Dict
             )
         connection.commit()
     return overdue_items
+
 
 def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] = None) -> Dict[str, Any]:
     connection = None
@@ -134,7 +143,7 @@ def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] =
         day_of_week_str = gen_date.strftime("%A")
 
         query = """
-            SELECT 
+            SELECT
                 s.schedule_id,
                 s.habit_id,
                 s.start_time,
@@ -147,7 +156,9 @@ def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] =
                 c.category_name
             FROM habit_schedule s
             JOIN habits h ON s.habit_id = h.habit_id
-            LEFT JOIN categories c ON h.category_id = c.category_id
+            LEFT JOIN categories c
+                ON h.category_id = c.category_id
+                AND c.deleted_at IS NULL
             WHERE h.user_id = %s
                 AND s.status = 'Active'
                 AND h.status = 'Active'
@@ -241,18 +252,18 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
 
         safe_query = """
             SELECT o.occurrence_id, o.habit_id, o.schedule_id, o.habit_name_snapshot,
-                    o.priority_snapshot, o.category_snapshot, o.occurrence_date,
-                    o.start_time, o.end_time, o.duration_minutes, o.status,
-                    o.base_score, o.final_score, o.carry_forward_attempt,
-                    o.original_occurrence_id, o.status_recorded_at,
-                    TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
+                   o.priority_snapshot, o.category_snapshot, o.occurrence_date,
+                   o.start_time, o.end_time, o.duration_minutes, o.status,
+                   o.base_score, o.final_score, o.carry_forward_attempt,
+                   o.original_occurrence_id, o.status_recorded_at,
+                   TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE h.user_id = %s
                 AND o.occurrence_date = %s
                 AND h.deleted_at IS NULL
                 AND h.status != 'Deleted'
-        """        
+        """
         cursor.execute(safe_query, (user_id, target_date))
         occurrences = cursor.fetchall()
 
@@ -269,7 +280,7 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
                 occ["status"] != "Pending" and sec is not None and sec >= 6 * 3600
             )
             if occ.get("status_recorded_at") is not None:
-                occ["status_recorded_at"] = str(occ["status_recordede_at"])
+                occ["status_recorded_at"] = str(occ["status_recorded_at"])
 
         return {
             "date": target_date,
@@ -291,6 +302,7 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
         if connection and connection.is_connected():
             connection.close()
 
+
 def update_occurrence_status_in_db(
     occurrence_id: int,
     new_status: str,
@@ -305,7 +317,7 @@ def update_occurrence_status_in_db(
 
         auth_query = """
             SELECT o.occurrence_id, o.status AS current_status, o.base_score, h.user_id,
-                    TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
+                   TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE o.occurrence_id = %s AND h.user_id = %s
@@ -321,9 +333,19 @@ def update_occurrence_status_in_db(
 
         _enforce_six_hour_lock(old_status, occurrence.get("seconds_since_recorded"))
 
-        valid_statuses = ["Pending", "Done", "Not Done", "Carried Over", "Incomplete", "Skipped", "Cancelled"]
+        valid_statuses = [
+            "Pending",
+            "Done",
+            "Not Done",
+            "Carried Over",
+            "Incomplete",
+            "Skipped",
+            "Cancelled",
+        ]
         if new_status not in valid_statuses:
-            raise OccurrenceRuleError(f"Invalid status. Must be one of {valid_statuses}.", status_code=400)
+            raise OccurrenceRuleError(
+                f"Invalid status. Must be one of {valid_statuses}.", status_code=400
+            )
 
         completed_at = None
         final_score = occurrence["base_score"]
@@ -408,7 +430,7 @@ def carry_forward_occurrence_in_db(
 
         fetch_query = """
             SELECT o.*, h.user_id AS owner_user_id,
-                    TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
+                   TIMESTAMPDIFF(SECOND, o.status_recorded_at, CURRENT_TIMESTAMP) AS seconds_since_recorded
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
             WHERE o.occurrence_id = %s AND h.user_id = %s
@@ -617,7 +639,9 @@ def fetch_score_summary(user_id: int, date_str: Optional[str] = None) -> Dict[st
         potential_score = float(result["total_potential_score"] or 0.00)
         earned_score = float(result["total_earned_score"] or 0.00)
 
-        efficiency_percentage = round((earned_score / potential_score * 100), 2) if potential_score > 0 else 0.00
+        efficiency_percentage = (
+            round((earned_score / potential_score * 100), 2) if potential_score > 0 else 0.00
+        )
 
         return {
             "date": target_date,
@@ -653,7 +677,7 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
                 o.occurrence_id,
                 o.habit_id,
                 o.habit_name_snapshot,
-                o.category_snapshot,
+                c.category_name AS live_category_name,
                 o.priority_snapshot,
                 o.occurrence_date,
                 o.status,
@@ -661,6 +685,9 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
                 o.final_score
             FROM habit_occurrences o
             JOIN habits h ON o.habit_id = h.habit_id
+            LEFT JOIN categories c
+                ON h.category_id = c.category_id
+                AND c.deleted_at IS NULL
             WHERE h.user_id = %s
                 AND o.occurrence_date BETWEEN %s AND %s
                 AND o.status NOT IN ('Carried Over', 'Cancelled')
@@ -676,13 +703,25 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
         total_earned_points = round(sum(float(r["final_score"] or 0.0) for r in range_rows), 2)
         total_potential_points = round(sum(float(r["base_score"] or 0.0) for r in range_rows), 2)
 
-        completion_rate = round((total_done / total_scheduled * 100), 1) if total_scheduled > 0 else 0.0
-        score_efficiency = round((total_earned_points / total_potential_points * 100), 1) if total_potential_points > 0 else 0.0
+        completion_rate = (
+            round((total_done / total_scheduled * 100), 1) if total_scheduled > 0 else 0.0
+        )
+        score_efficiency = (
+            round((total_earned_points / total_potential_points * 100), 1)
+            if total_potential_points > 0
+            else 0.0
+        )
 
         daily_map = {}
         for i in range(days):
             d_str = str(start_date + timedelta(days=i))
-            daily_map[d_str] = {"date": d_str, "total": 0, "done": 0, "missed": 0, "efficiency": 0.0}
+            daily_map[d_str] = {
+                "date": d_str,
+                "total": 0,
+                "done": 0,
+                "missed": 0,
+                "efficiency": 0.0,
+            }
 
         category_map = {}
 
@@ -695,22 +734,35 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
                 elif r["status"] == "Not Done":
                     daily_map[d_str]["missed"] += 1
 
-            cat_name = r.get("category_snapshot") or "General"
-            if cat_name not in category_map:
-                category_map[cat_name] = {"category": cat_name, "total": 0, "done": 0, "rate": 0.0}
-            category_map[cat_name]["total"] += 1
-            if r["status"] == "Done":
-                category_map[cat_name]["done"] += 1
+            # Exclude deleted categories from By Category breakdown
+            cat_name = r.get("live_category_name")
+            if cat_name:
+                if cat_name not in category_map:
+                    category_map[cat_name] = {
+                        "category": cat_name,
+                        "total": 0,
+                        "done": 0,
+                        "rate": 0.0,
+                    }
+                category_map[cat_name]["total"] += 1
+                if r["status"] == "Done":
+                    category_map[cat_name]["done"] += 1
 
         daily_trend = []
         for d_str in sorted(daily_map.keys()):
             entry = daily_map[d_str]
-            entry["efficiency"] = round((entry["done"] / entry["total"] * 100), 1) if entry["total"] > 0 else 0.0
+            entry["efficiency"] = (
+                round((entry["done"] / entry["total"] * 100), 1) if entry["total"] > 0 else 0.0
+            )
             daily_trend.append(entry)
 
         category_breakdown = []
         for cat_entry in category_map.values():
-            cat_entry["rate"] = round((cat_entry["done"] / cat_entry["total"] * 100), 1) if cat_entry["total"] > 0 else 0.0
+            cat_entry["rate"] = (
+                round((cat_entry["done"] / cat_entry["total"] * 100), 1)
+                if cat_entry["total"] > 0
+                else 0.0
+            )
             category_breakdown.append(cat_entry)
         category_breakdown.sort(key=lambda x: (-x["rate"], -x["done"]))
 
@@ -718,7 +770,9 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
             """
             SELECT h.habit_id, h.habit_name, h.priority, c.category_name
             FROM habits h
-            LEFT JOIN categories c ON h.category_id = c.category_id
+            LEFT JOIN categories c
+                ON h.category_id = c.category_id
+                AND c.deleted_at IS NULL
             WHERE h.user_id = %s
               AND h.status = 'Active'
               AND h.deleted_at IS NULL
@@ -794,7 +848,11 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
             if current_streak > best_overall_streak:
                 best_overall_streak = current_streak
 
-            habit_rate = round((total_habit_done / total_habit_logged * 100), 1) if total_habit_logged > 0 else 0.0
+            habit_rate = (
+                round((total_habit_done / total_habit_logged * 100), 1)
+                if total_habit_logged > 0
+                else 0.0
+            )
 
             habit_streaks.append(
                 {
@@ -809,7 +867,9 @@ def fetch_habit_analytics(user_id: int, days: int = 30) -> Dict[str, Any]:
                 }
             )
 
-        habit_streaks.sort(key=lambda x: (-x["current_streak"], -x["longest_streak"], x["habit_name"]))
+        habit_streaks.sort(
+            key=lambda x: (-x["current_streak"], -x["longest_streak"], x["habit_name"])
+        )
 
         return {
             "days": days,

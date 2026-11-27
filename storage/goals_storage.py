@@ -39,7 +39,30 @@ class GoalRuleError(Exception):
         self.status_code = status_code
 
 
-def _serialize_goal(row: Dict[str, Any], progress_percentage: float = 0.0) -> Dict[str, Any]:
+def _count_active_linked_habits(cursor, goal_id: int, user_id: int) -> int:
+    cursor.execute(
+        """
+        SELECT COUNT(DISTINCT hg.habit_id) AS cnt
+        FROM habit_goals hg
+        JOIN habits h ON hg.habit_id = h.habit_id
+        WHERE hg.goal_id = %s
+          AND hg.user_id = %s
+          AND hg.unlinked_at IS NULL
+          AND hg.deleted_at IS NULL
+          AND h.deleted_at IS NULL
+          AND h.status <> 'Deleted'
+        """,
+        (goal_id, user_id),
+    )
+    row = cursor.fetchone()
+    return int(row["cnt"] or 0) if row else 0
+
+
+def _serialize_goal(
+    row: Dict[str, Any],
+    progress_percentage: float = 0.0,
+    linked_habits_count: int = 0,
+) -> Dict[str, Any]:
     return {
         "goal_id": row["goal_id"],
         "user_id": row["user_id"],
@@ -51,6 +74,7 @@ def _serialize_goal(row: Dict[str, Any], progress_percentage: float = 0.0) -> Di
         "completed_at": str(row["completed_at"]) if row.get("completed_at") else None,
         "notes": row["notes"],
         "progress_percentage": round(float(progress_percentage), 2),
+        "linked_habits_count": int(linked_habits_count),
         "created_at": str(row["created_at"]) if row.get("created_at") else None,
         "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
     }
@@ -244,7 +268,6 @@ def _expire_overdue_goals(cursor, user_id: Optional[int] = None, goal_id: Option
 def _sync_goal_lifecycle_states(cursor, user_id: Optional[int] = None, goal_id: Optional[int] = None) -> Dict[str, int]:
     activated = _activate_due_planned_goals(cursor, user_id=user_id, goal_id=goal_id)
 
-    # Evaluate Active goals for 100% completion before expiring overdue one
     if user_id is not None:
         if goal_id is not None:
             _evaluate_goal_and_criteria_completion(cursor, goal_id, user_id)
@@ -297,7 +320,6 @@ def _compute_goal_progress_percentage(cursor, goal_id: int, user_id: int) -> flo
     if earned_count <= 0:
         return 0.0
 
-    # Count total scheduled/logged occurrences of linked habits within the goal window
     date_clauses = ["o.occurrence_date >= %s"]
     params: List[Any] = [goal_id, user_id, goal_row["start_date"] or date.today()]
     if goal_row.get("end_date"):
@@ -358,7 +380,6 @@ def create_goal(
         )
         new_goal_id = cursor.lastrowid
 
-        # Auto-create the internal tracking criterion so users never have to configure criteria manually
         _ensure_default_goal_criterion(cursor, new_goal_id, user_id, goal_name)
 
         cursor.execute(
@@ -387,7 +408,7 @@ def create_goal(
         )
         created_goal = cursor.fetchone()
         connection.commit()
-        return _serialize_goal(created_goal, progress_percentage=0.0)
+        return _serialize_goal(created_goal, progress_percentage=0.0, linked_habits_count=0)
 
     except GoalRuleError:
         if connection:
@@ -445,7 +466,14 @@ def list_user_goals(user_id: int, status_filter: Optional[str] = None) -> List[D
         results = []
         for row in rows:
             pct = _compute_goal_progress_percentage(cursor, row["goal_id"], user_id)
-            results.append(_serialize_goal(row, progress_percentage=pct))
+            linked_cnt = _count_active_linked_habits(cursor, row["goal_id"], user_id)
+            results.append(
+                _serialize_goal(
+                    row,
+                    progress_percentage=pct,
+                    linked_habits_count=linked_cnt,
+                )
+            )
         return results
 
     finally:
@@ -479,7 +507,12 @@ def get_goal_by_id(goal_id: int, user_id: int) -> Optional[Dict[str, Any]]:
             return None
 
         pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
-        return _serialize_goal(row, progress_percentage=pct)
+        linked_cnt = _count_active_linked_habits(cursor, goal_id, user_id)
+        return _serialize_goal(
+            row,
+            progress_percentage=pct,
+            linked_habits_count=linked_cnt,
+        )
 
     finally:
         if cursor:
@@ -582,8 +615,13 @@ def update_goal_details(
         )
         updated = cursor.fetchone()
         pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
+        linked_cnt = _count_active_linked_habits(cursor, goal_id, user_id)
         connection.commit()
-        return _serialize_goal(updated, progress_percentage=pct)
+        return _serialize_goal(
+            updated,
+            progress_percentage=pct,
+            linked_habits_count=linked_cnt,
+        )
 
     except GoalRuleError:
         if connection:
@@ -692,8 +730,13 @@ def change_goal_status(
         )
         updated = cursor.fetchone()
         pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
+        linked_cnt = _count_active_linked_habits(cursor, goal_id, user_id)
         connection.commit()
-        return _serialize_goal(updated, progress_percentage=pct)
+        return _serialize_goal(
+            updated,
+            progress_percentage=pct,
+            linked_habits_count=linked_cnt,
+        )
 
     except GoalRuleError:
         if connection:
@@ -813,7 +856,7 @@ def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -
     )
     goal_row = cursor.fetchone()
     if not goal_row or goal_row["status"] != "Active":
-        return
+        return False
 
     pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
     if pct < 100.0:
@@ -840,7 +883,7 @@ def _evaluate_goal_and_criteria_completion(cursor, goal_id: int, user_id: int) -
             )
             _auto_unlink_terminal_goal_habits(cursor, goal_id, user_id)
             return True
-    
+
     return False
 
 
@@ -1281,7 +1324,6 @@ def link_habit_to_goal(
         )
         new_link_id = cursor.lastrowid
 
-        # Automatically attach the habit to the goal's internal tracking criterion
         default_criterion_id = _ensure_default_goal_criterion(
             cursor, goal_id, user_id, goal["goal_name"]
         )
@@ -1445,7 +1487,11 @@ def list_goal_habits(goal_id: int, user_id: int, include_history: bool = False) 
         if not cursor.fetchone():
             raise GoalRuleError("Goal not found or unauthorized.", status_code=404)
 
-        active_filter = "" if include_history else "AND hg.unlinked_at IS NULL"
+        active_filter = (
+            ""
+            if include_history
+            else "AND hg.unlinked_at IS NULL AND h.deleted_at IS NULL AND h.status <> 'Deleted'"
+        )
         cursor.execute(
             f"""
             SELECT hg.*, h.habit_name
@@ -1459,7 +1505,15 @@ def list_goal_habits(goal_id: int, user_id: int, include_history: bool = False) 
             """,
             (goal_id, user_id),
         )
-        return [_serialize_habit_goal_link(r) for r in cursor.fetchall()]
+        rows = cursor.fetchall()
+        results = []
+        for r in rows:
+            serialized = _serialize_habit_goal_link(r)
+            # If the underlying habit was deleted after linking, mark link inactive in history view
+            if include_history and (r.get("deleted_at") is not None):
+                serialized["is_active"] = False
+            results.append(serialized)
+        return results
 
     finally:
         if cursor:
@@ -1610,7 +1664,7 @@ def list_criterion_habits(
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        active_filter = "" if include_history else "AND gch.unlinked_at IS NULL"
+        active_filter = "" if include_history else "AND gch.unlinked_at IS NULL AND h.deleted_at IS NULL AND h.status <> 'Deleted'"
         cursor.execute(
             f"""
             SELECT gch.*, h.habit_name
@@ -1724,6 +1778,8 @@ def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) ->
         )
         progress_id = cursor.lastrowid
 
+        just_completed = _evaluate_goal_and_criteria_completion(cursor, g["goal_id"], user_id)
+
         recorded_items.append(
             {
                 "progress_id": progress_id,
@@ -1734,13 +1790,11 @@ def record_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) ->
                 "habit_occurrence_id": occurrence_id,
                 "contribution_amount": 1.0,
                 "measurement_unit": "completions",
+                "goal_completed": just_completed,
             }
         )
 
     return recorded_items
-
-    just_completed = _evaluate_goal_and_criteria_completion(cursor, g["goal_id"], user_id)
-    recorded_items[-1]["goal_completed"] = just_completed
 
 
 def remove_occurrence_goal_progress(cursor, occurrence_id: int, user_id: int) -> int:
@@ -1782,6 +1836,7 @@ def get_goal_progress_summary(goal_id: int, user_id: int) -> Dict[str, Any]:
             raise GoalRuleError("Goal not found or unauthorized.", status_code=404)
 
         overall_pct = _compute_goal_progress_percentage(cursor, goal_id, user_id)
+        linked_cnt = _count_active_linked_habits(cursor, goal_id, user_id)
 
         cursor.execute(
             """
@@ -1824,7 +1879,11 @@ def get_goal_progress_summary(goal_id: int, user_id: int) -> Dict[str, Any]:
             )
 
         return {
-            "goal": _serialize_goal(goal_row, progress_percentage=overall_pct),
+            "goal": _serialize_goal(
+                goal_row,
+                progress_percentage=overall_pct,
+                linked_habits_count=linked_cnt,
+            ),
             "criteria_progress": [],
             "records_count": len(progress_records),
             "progress_records": progress_records,

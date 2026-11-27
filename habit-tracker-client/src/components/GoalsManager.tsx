@@ -28,6 +28,8 @@ interface UserHabitOption {
     status?: string;
 }
 
+type GoalWithCount = Goal & { linked_habits_count?: number };
+
 const STATUS_FILTERS: Array<'ALL' | GoalStatus> = [
     'ALL',
     'Active',
@@ -118,7 +120,7 @@ const CircularRing: React.FC<{
 };
 
 export function GoalsManager() {
-    const [goals, setGoals] = useState<Goal[]>([]);
+    const [goals, setGoals] = useState<GoalWithCount[]>([]);
     const [linkedCounts, setLinkedCounts] = useState<Record<number, number>>({});
     const [statusFilter, setStatusFilter] = useState<'ALL' | GoalStatus>('ALL');
     const [loading, setLoading] = useState<boolean>(true);
@@ -162,12 +164,16 @@ export function GoalsManager() {
         setLoading(true);
         setError(null);
         try {
-            const data = await fetchGoals(statusFilter === 'ALL' ? undefined : statusFilter);
+            const data: GoalWithCount[] = await fetchGoals(
+                statusFilter === 'ALL' ? undefined : statusFilter
+            );
             setGoals(data);
 
-            // Fetch active linked habit counts per goal for the `/ X linked` badge
             const countsEntries = await Promise.all(
                 data.map(async (g) => {
+                    if (typeof g.linked_habits_count === 'number') {
+                        return [g.goal_id, g.linked_habits_count] as const;
+                    }
                     try {
                         const links = await fetchGoalHabits(g.goal_id, false);
                         return [g.goal_id, links.length] as const;
@@ -407,6 +413,10 @@ export function GoalsManager() {
         try {
             await linkHabitToGoal(selectedGoalId, Number(selectedParentHabitId));
             setSelectedParentHabitId('');
+            setLinkedCounts((prev) => ({
+                ...prev,
+                [selectedGoalId]: (prev[selectedGoalId] ?? 0) + 1,
+            }));
             setBanner(
                 'Habit linked to goal. Marking it Done on your Dashboard will automatically advance goal progress.'
             );
@@ -424,6 +434,10 @@ export function GoalsManager() {
         setError(null);
         try {
             await unlinkHabitFromGoal(selectedGoalId, habitId);
+            setLinkedCounts((prev) => ({
+                ...prev,
+                [selectedGoalId]: Math.max(0, (prev[selectedGoalId] ?? 1) - 1),
+            }));
             setBanner('Habit unlinked from goal.');
             await Promise.all([loadGoals(), loadGoalWorkspace(selectedGoalId)]);
         } catch (err) {
@@ -732,7 +746,8 @@ export function GoalsManager() {
                 <div className="space-y-3">
                     {goals.map((goal) => {
                         const isSelected = selectedGoalId === goal.goal_id;
-                        const count = linkedCounts[goal.goal_id] ?? 0;
+                        const count =
+                            linkedCounts[goal.goal_id] ?? goal.linked_habits_count ?? 0;
 
                         return (
                             <div

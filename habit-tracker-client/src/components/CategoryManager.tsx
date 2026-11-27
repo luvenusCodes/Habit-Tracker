@@ -80,11 +80,51 @@ const CATEGORY_THEMES: CategoryTheme[] = [
         ringBgClass: 'bg-rose-500/15 border-rose-400/30',
         ringTextClass: 'text-rose-600 dark:text-rose-300',
     },
+    {
+        name: 'Amber Gold',
+        barClass: 'bg-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.75)]',
+        glowClass: 'from-amber-400/18',
+        strokeClass: 'stroke-amber-500 dark:stroke-amber-300',
+        dotClass: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]',
+        badgeClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/30',
+        ringBgClass: 'bg-amber-400/15 border-amber-400/30',
+        ringTextClass: 'text-amber-600 dark:text-amber-300',
+    },
+    {
+        name: 'Cyan Sky',
+        barClass: 'bg-cyan-400 shadow-[0_0_16px_rgba(34,211,238,0.75)]',
+        glowClass: 'from-cyan-400/18',
+        strokeClass: 'stroke-cyan-500 dark:stroke-cyan-300',
+        dotClass: 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]',
+        badgeClass: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-400/30',
+        ringBgClass: 'bg-cyan-400/15 border-cyan-400/30',
+        ringTextClass: 'text-cyan-600 dark:text-cyan-300',
+    },
+    {
+        name: 'Fuchsia Orchid',
+        barClass: 'bg-fuchsia-500 shadow-[0_0_16px_rgba(217,70,239,0.75)]',
+        glowClass: 'from-fuchsia-500/18',
+        strokeClass: 'stroke-fuchsia-500 dark:stroke-fuchsia-400',
+        dotClass: 'bg-fuchsia-500 shadow-[0_0_8px_rgba(217,70,239,0.8)]',
+        badgeClass: 'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-400/30',
+        ringBgClass: 'bg-fuchsia-500/15 border-fuchsia-400/30',
+        ringTextClass: 'text-fuchsia-600 dark:text-fuchsia-300',
+    },
+    {
+        name: 'Lime Volt',
+        barClass: 'bg-lime-400 shadow-[0_0_16px_rgba(163,230,53,0.75)]',
+        glowClass: 'from-lime-400/18',
+        strokeClass: 'stroke-lime-500 dark:stroke-lime-300',
+        dotClass: 'bg-lime-400 shadow-[0_0_8px_rgba(163,230,53,0.8)]',
+        badgeClass: 'bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-400/30',
+        ringBgClass: 'bg-lime-400/15 border-lime-400/30',
+        ringTextClass: 'text-lime-600 dark:text-lime-300',
+    },
 ];
 
-const getCategoryTheme = (categoryId: number, index: number): CategoryTheme => {
-    const idx = Math.abs(categoryId || index) % CATEGORY_THEMES.length;
-    return CATEGORY_THEMES[idx];
+const getCategoryTheme = (index: number): CategoryTheme => {
+    const safeIdx = Math.max(0, index) % CATEGORY_THEMES.length;
+    return CATEGORY_THEMES[safeIdx];
 };
 
 export const CategoryManager = () => {
@@ -165,7 +205,7 @@ export const CategoryManager = () => {
                 category: cat,
                 count: list.length,
                 pct,
-                theme: getCategoryTheme(cat.category_id, idx),
+                theme: getCategoryTheme(idx),
             };
         });
         return enriched.sort((a, b) => b.count - a.count).slice(0, 3);
@@ -246,7 +286,7 @@ export const CategoryManager = () => {
         ? categories.findIndex((c) => c.category_id === selectedCategory.category_id)
         : 0;
     const selectedTheme = selectedCategory
-        ? getCategoryTheme(selectedCategory.category_id, selectedIndex)
+        ? getCategoryTheme(selectedIndex)
         : CATEGORY_THEMES[0];
     const selectedCategoryHabits = selectedCategory
         ? habitsByCategory.get(selectedCategory.category_id) || []
@@ -339,7 +379,7 @@ export const CategoryManager = () => {
                     ) : (
                         <ul className="space-y-3">
                             {categories.map((cat, idx) => {
-                                const theme = getCategoryTheme(cat.category_id, idx);
+                                const theme = getCategoryTheme(idx);
                                 const isSelected = selectedCategory?.category_id === cat.category_id;
                                 const isEditing = editingId === cat.category_id;
                                 const isConfirmingDelete = confirmDeleteId === cat.category_id;
@@ -357,8 +397,8 @@ export const CategoryManager = () => {
                                             }
                                         }}
                                         className={`group relative overflow-hidden rounded-2xl backdrop-blur-xl transition-all cursor-pointer border ${isSelected
-                                                ? 'bg-white/90 dark:bg-white/10 border-blue-400/60 dark:border-white/25 shadow-lg shadow-black/5 dark:shadow-black/30'
-                                                : 'bg-white/65 dark:bg-white/5 border-gray-200/80 dark:border-white/10 hover:bg-white/85 dark:hover:bg-white/8'
+                                            ? 'bg-white/90 dark:bg-white/10 border-blue-400/60 dark:border-white/25 shadow-lg shadow-black/5 dark:shadow-black/30'
+                                            : 'bg-white/65 dark:bg-white/5 border-gray-200/80 dark:border-white/10 hover:bg-white/85 dark:hover:bg-white/8'
                                             }`}
                                     >
                                         {/* Subtle Specular Color Glow Behind Left Accent Bar */}

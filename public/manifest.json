@@ -1,0 +1,17 @@
+{
+    "name": "Habit Tracker",
+    "short_name": "Habit Tracker",
+    "description": "Track daily habits, schedules, and long-term goals",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#14151b",
+    "theme_color": "#10b981",
+    "orientation": "potrait",
+    "icons": [
+        {
+            "src": "/vite.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ]
+}

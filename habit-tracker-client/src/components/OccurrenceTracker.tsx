@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import type {
     Occurrence,
     OccurrenceHistoryItem,
@@ -76,6 +76,36 @@ function toInputTime(timeStr?: string | null): string {
     return timeStr;
 }
 
+// Play a subtle pleasant two-tone chime using Web Audio API when focus timer completes
+function playFocusCompleteChime() {
+    try {
+        const AudioCtx =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+
+        const playNote = (freq: number, startOffset: number, duration: number) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + startOffset);
+            gain.gain.setValueAtTime(0.001, ctx.currentTime + startOffset);
+            gain.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + startOffset + 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + startOffset + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + startOffset);
+            osc.stop(ctx.currentTime + startOffset + duration);
+        };
+
+        playNote(587.33, 0, 0.45); // D5
+        playNote(880.0, 0.22, 0.65); // A5
+    } catch {
+        // Ignore if browser blocks audio
+    }
+}
+
 export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps) => {
     const todayStr = useMemo(() => getLocalDateStr(), []);
     const [selectedDate, setSelectedDate] = useState<string>(todayStr);
@@ -98,10 +128,16 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         Math.floor(Math.random() * INSPIRATIONAL_QUOTES.length)
     );
 
-    // Interactive Focus Timer Widget
+    // Interactive Editable Focus Timer Widget
     const [focusDurationMins, setFocusDurationMins] = useState<number>(25);
     const [secondsLeft, setSecondsLeft] = useState<number>(25 * 60);
     const [timerRunning, setTimerRunning] = useState<boolean>(false);
+    const [editingFocusTime, setEditingFocusTime] = useState<boolean>(false);
+    const [customMinutesInput, setCustomMinutesInput] = useState<string>('25');
+    const [focusCompleteModal, setFocusCompleteModal] = useState<{
+        completedMinutes: number;
+    } | null>(null);
+    const focusCompletedRef = useRef<boolean>(false);
 
     // Filters
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -117,7 +153,7 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
     const [historyMap, setHistoryMap] = useState<Record<number, OccurrenceHistoryItem[]>>({});
     const [historyLoadingId, setHistoryLoadingId] = useState<number | null>(null);
 
-    // Custom Carry-Forward modal state (shared by both today's items and >24h unattended items)
+    // Custom Carry-Forward modal state
     const [carryForwardTarget, setCarryForwardTarget] = useState<{
         occurrence_id: number;
         habit_name: string;
@@ -141,20 +177,68 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         return () => clearInterval(id);
     }, []);
 
-    // Focus Timer countdown tick
+    // Focus Timer countdown tick + pop-up notification on completion
     useEffect(() => {
         if (!timerRunning) return;
+        focusCompletedRef.current = false;
+
         const interval = setInterval(() => {
             setSecondsLeft((prev) => {
                 if (prev <= 1) {
                     setTimerRunning(false);
+                    if (!focusCompletedRef.current) {
+                        focusCompletedRef.current = true;
+                        playFocusCompleteChime();
+                        setFocusCompleteModal({ completedMinutes: focusDurationMins });
+                        if (
+                            typeof Notification !== 'undefined' &&
+                            Notification.permission === 'granted'
+                        ) {
+                            new Notification('Focus Session Complete!', {
+                                body: `You completed your ${focusDurationMins}-minute Deep Work block.`,
+                            });
+                        }
+                    }
                     return 0;
                 }
                 return prev - 1;
             });
         }, 1000);
+
         return () => clearInterval(interval);
-    }, [timerRunning]);
+    }, [timerRunning, focusDurationMins]);
+
+    const handleSelectFocusDuration = (mins: number) => {
+        const validMins = Math.max(1, Math.min(240, Math.round(mins)));
+        setTimerRunning(false);
+        setFocusDurationMins(validMins);
+        setCustomMinutesInput(String(validMins));
+        setSecondsLeft(validMins * 60);
+        setEditingFocusTime(false);
+    };
+
+    const handleSaveCustomFocusTime = (e: React.FormEvent) => {
+        e.preventDefault();
+        const parsed = parseInt(customMinutesInput, 10);
+        if (isNaN(parsed) || parsed < 1) return;
+        handleSelectFocusDuration(parsed);
+    };
+
+    const handleToggleTimer = () => {
+        // Request desktop notification permission subtly on first start
+        if (
+            !timerRunning &&
+            typeof Notification !== 'undefined' &&
+            Notification.permission === 'default'
+        ) {
+            Notification.requestPermission().catch(() => { });
+        }
+        if (secondsLeft === 0) {
+            setSecondsLeft(focusDurationMins * 60);
+        }
+        setEditingFocusTime(false);
+        setTimerRunning((prev) => !prev);
+    };
 
     const handleCycleQuote = () => {
         setQuoteIndex((prev) => (prev + 1) % INSPIRATIONAL_QUOTES.length);
@@ -170,7 +254,6 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
 
             setOccurrences(occData.occurrences || []);
 
-            // Only show unattended prompt if backend explicitly returns items overdue by >= 24h
             const overdueList = occData.unattended_overdue?.items ?? [];
             setUnattendedItems(overdueList);
 
@@ -225,7 +308,6 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         }
     };
 
-    // Handle individual >24h unattended item action (Done or Skip)
     const handleUnattendedResolve = async (
         item: UnattendedOverdueItem,
         action: 'Done' | 'Skipped'
@@ -238,9 +320,7 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                     ? 'Resolved late (>24h unattended) as Done'
                     : 'Skipped by user (>24h unattended)';
             await updateOccurrenceStatus(item.occurrence_id, action, reason);
-            setInfoBanner(
-                `"${item.habit_name_snapshot}" marked as ${action}.`
-            );
+            setInfoBanner(`"${item.habit_name_snapshot}" marked as ${action}.`);
             await loadData();
         } catch (err) {
             setError((err as Error).message);
@@ -249,7 +329,6 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         }
     };
 
-    // Auto-skip all remaining >24h unattended occurrences if user dismisses without acting
     const handleDismissAndAutoSkipAll = async () => {
         if (unattendedItems.length === 0) return;
         try {
@@ -277,18 +356,16 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         }
     };
 
-    const openCarryForwardModal = (
-        target: {
-            occurrence_id: number;
-            habit_name: string;
-            occurrence_date: string;
-            start_time?: string | null;
-            end_time?: string | null;
-            duration_minutes?: number | null;
-            carry_forward_attempt: number;
-            isFromUnattended?: boolean;
-        }
-    ) => {
+    const openCarryForwardModal = (target: {
+        occurrence_id: number;
+        habit_name: string;
+        occurrence_date: string;
+        start_time?: string | null;
+        end_time?: string | null;
+        duration_minutes?: number | null;
+        carry_forward_attempt: number;
+        isFromUnattended?: boolean;
+    }) => {
         const minTargetDate = target.isFromUnattended
             ? todayStr
             : shiftDateStr(target.occurrence_date || selectedDate, 1);
@@ -356,7 +433,6 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         }
     };
 
-    // Live counts for status filter badges
     const statusCounts = useMemo(() => {
         return {
             ALL: occurrences.length,
@@ -369,7 +445,6 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         };
     }, [occurrences]);
 
-    // Combined Status + Priority filtered list
     const filteredOccurrences = useMemo(() => {
         return occurrences.filter((occ) => {
             const matchesStatus =
@@ -386,7 +461,6 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
         });
     }, [occurrences, statusFilter, priorityFilter]);
 
-    // Greeting text based on local hour
     const greetingText = useMemo(() => {
         const hr = nowTime.getHours();
         if (hr < 12) return 'Good Morning';
@@ -449,6 +523,78 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                 <div className="absolute top-1/3 right-1/5 w-96 h-96 rounded-full bg-orange-500/10 dark:bg-orange-500/12 blur-3xl" />
                 <div className="absolute bottom-16 left-1/3 w-80 h-80 rounded-full bg-indigo-500/10 dark:bg-indigo-500/14 blur-3xl" />
             </div>
+
+            {/* FOCUS SESSION COMPLETE POP-UP NOTIFICATION MODAL */}
+            {focusCompleteModal && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                >
+                    <div className="relative w-full max-w-sm rounded-3xl backdrop-blur-xl bg-white/95 dark:bg-[#161a29]/95 border border-orange-300/60 dark:border-orange-400/30 shadow-2xl p-6 text-center space-y-4 overflow-hidden">
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute -top-12 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full bg-orange-500/20 blur-2xl"
+                        />
+
+                        <div className="relative z-10 w-14 h-14 mx-auto rounded-2xl bg-orange-500/15 border border-orange-400/40 text-orange-500 dark:text-orange-300 flex items-center justify-center shadow-inner">
+                            <svg
+                                className="w-7 h-7"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2.2}
+                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                        </div>
+
+                        <div className="relative z-10 space-y-1">
+                            <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-orange-600 dark:text-orange-300">
+                                Deep Work Complete
+                            </span>
+                            <h3 className="text-xl font-black text-gray-900 dark:text-white">
+                                Focus Session Finished!
+                            </h3>
+                            <p className="text-xs sm:text-sm text-gray-600 dark:text-slate-300">
+                                Great discipline—you just completed a{' '}
+                                <span className="font-bold text-gray-900 dark:text-white">
+                                    {focusCompleteModal.completedMinutes}-minute
+                                </span>{' '}
+                                focus block. Ready to check off your habit or take a quick breather?
+                            </p>
+                        </div>
+
+                        <div className="relative z-10 flex items-center justify-center gap-2.5 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setFocusCompleteModal(null);
+                                    setSecondsLeft(focusDurationMins * 60);
+                                }}
+                                className="flex-1 py-2.5 px-4 rounded-full text-xs font-bold border border-gray-200 dark:border-white/15 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                            >
+                                Dismiss
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setFocusCompleteModal(null);
+                                    setSecondsLeft(focusDurationMins * 60);
+                                    setTimerRunning(true);
+                                }}
+                                className="flex-1 py-2.5 px-4 rounded-full text-xs font-bold bg-orange-500 hover:bg-orange-400 text-white shadow-md shadow-orange-500/25 transition-colors"
+                            >
+                                Start Another
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* STRICT >24H UNATTENDED OVERDUE PROMPT (ONLY RENDERED WHEN unattendedItems.length > 0) */}
             {unattendedItems.length > 0 && (
@@ -742,7 +888,7 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                 </div>
             </div>
 
-            {/* SECOND BENTO ROW: PRODUCTIVITY DONUT + LIVE FOCUS TIMER */}
+            {/* SECOND BENTO ROW: PRODUCTIVITY DONUT + EDITABLE LIVE FOCUS TIMER */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                 {/* Productivity Ring Card (7 cols) */}
                 <div className="lg:col-span-7 rounded-3xl backdrop-blur-xl bg-white/75 dark:bg-[#131724]/85 border border-gray-200/80 dark:border-white/10 p-6 flex items-center justify-between gap-4 shadow-sm">
@@ -826,14 +972,15 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                     </div>
                 </div>
 
-                {/* Live Focus Timer Card (5 cols) */}
+                {/* Editable Live Focus Timer Card (5 cols) */}
                 <div className="lg:col-span-5 relative overflow-hidden rounded-3xl backdrop-blur-xl bg-white/75 dark:bg-[#131724]/85 border border-gray-200/80 dark:border-white/10 p-6 flex flex-col items-center justify-between shadow-sm">
                     <div
                         aria-hidden="true"
                         className="pointer-events-none absolute -bottom-10 -right-10 w-44 h-44 rounded-full bg-orange-500/15 blur-2xl"
                     />
 
-                    <div className="w-full flex items-center justify-between">
+                    {/* Header with Preset Chips + Custom Edit Trigger */}
+                    <div className="w-full flex items-center justify-between gap-1.5">
                         <span className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-slate-400">
                             Focus Timer
                         </span>
@@ -842,65 +989,150 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                 <button
                                     key={mins}
                                     type="button"
-                                    onClick={() => {
-                                        setTimerRunning(false);
-                                        setFocusDurationMins(mins);
-                                        setSecondsLeft(mins * 60);
-                                    }}
-                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors ${focusDurationMins === mins
-                                        ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
-                                        : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
+                                    onClick={() => handleSelectFocusDuration(mins)}
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors ${!editingFocusTime && focusDurationMins === mins
+                                            ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
+                                            : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
                                         }`}
                                 >
                                     {mins}m
                                 </button>
                             ))}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setTimerRunning(false);
+                                    setCustomMinutesInput(String(focusDurationMins));
+                                    setEditingFocusTime((prev) => !prev);
+                                }}
+                                title="Set custom focus duration"
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors ${editingFocusTime ||
+                                        ![15, 25, 45].includes(focusDurationMins)
+                                        ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
+                                        : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
+                                    }`}
+                            >
+                                {![15, 25, 45].includes(focusDurationMins) && !editingFocusTime
+                                    ? `${focusDurationMins}m`
+                                    : 'Custom'}
+                            </button>
                         </div>
                     </div>
 
-                    <div className="relative w-28 h-28 my-2 flex items-center justify-center">
-                        <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                            <defs>
-                                <linearGradient id="focusGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                    <stop offset="0%" stopColor="#fb923c" />
-                                    <stop offset="100%" stopColor="#f97316" />
-                                </linearGradient>
-                            </defs>
-                            <circle
-                                cx="50"
-                                cy="50"
-                                r={timerRadius}
-                                strokeWidth="6"
-                                fill="transparent"
-                                className="stroke-gray-200/80 dark:stroke-white/10"
-                            />
-                            <circle
-                                cx="50"
-                                cy="50"
-                                r={timerRadius}
-                                strokeWidth="6"
-                                fill="transparent"
-                                stroke="url(#focusGrad)"
-                                strokeDasharray={timerCirc}
-                                strokeDashoffset={timerOffset}
-                                strokeLinecap="round"
-                                className="transition-all duration-300"
-                            />
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                            <span className="text-xl font-black text-gray-900 dark:text-white tabular-nums">
-                                {focusMinsDisplay}:{focusSecsDisplay}
-                            </span>
-                            <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-400">
-                                Deep Work
-                            </span>
+                    {/* Custom Duration Inline Editor or Circular Clock Dial */}
+                    {editingFocusTime ? (
+                        <form
+                            onSubmit={handleSaveCustomFocusTime}
+                            className="my-3 w-full max-w-56 flex flex-col items-center gap-2.5"
+                        >
+                            <label
+                                htmlFor="custom-focus-minutes"
+                                className="text-[11px] font-semibold text-gray-500 dark:text-slate-300"
+                            >
+                                Set Focus Duration (1–240 mins)
+                            </label>
+                            <div className="flex items-center gap-2 w-full">
+                                <input
+                                    id="custom-focus-minutes"
+                                    type="number"
+                                    min={1}
+                                    max={240}
+                                    required
+                                    autoFocus
+                                    value={customMinutesInput}
+                                    onChange={(e) => setCustomMinutesInput(e.target.value)}
+                                    className="w-full px-3 py-1.5 rounded-xl bg-gray-100/90 dark:bg-black/40 border border-orange-400/40 text-center text-base font-black text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                />
+                                <button
+                                    type="submit"
+                                    className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold shrink-0"
+                                >
+                                    Set
+                                </button>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setEditingFocusTime(false)}
+                                className="text-[11px] font-medium text-gray-400 hover:text-gray-600 dark:hover:text-slate-200"
+                            >
+                                Cancel
+                            </button>
+                        </form>
+                    ) : (
+                        <div
+                            onClick={() => {
+                                if (!timerRunning) {
+                                    setCustomMinutesInput(String(focusDurationMins));
+                                    setEditingFocusTime(true);
+                                }
+                            }}
+                            title={
+                                timerRunning
+                                    ? 'Pause timer to edit duration'
+                                    : 'Click to edit focus duration'
+                            }
+                            className={`relative w-28 h-28 my-2 flex items-center justify-center ${!timerRunning ? 'cursor-pointer group' : ''
+                                }`}
+                        >
+                            <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                                <defs>
+                                    <linearGradient id="focusGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stopColor="#fb923c" />
+                                        <stop offset="100%" stopColor="#f97316" />
+                                    </linearGradient>
+                                </defs>
+                                <circle
+                                    cx="50"
+                                    cy="50"
+                                    r={timerRadius}
+                                    strokeWidth="6"
+                                    fill="transparent"
+                                    className="stroke-gray-200/80 dark:stroke-white/10"
+                                />
+                                <circle
+                                    cx="50"
+                                    cy="50"
+                                    r={timerRadius}
+                                    strokeWidth="6"
+                                    fill="transparent"
+                                    stroke="url(#focusGrad)"
+                                    strokeDasharray={timerCirc}
+                                    strokeDashoffset={timerOffset}
+                                    strokeLinecap="round"
+                                    className="transition-all duration-300"
+                                />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                <span className="text-xl font-black text-gray-900 dark:text-white tabular-nums group-hover:text-orange-500 dark:group-hover:text-orange-300 transition-colors">
+                                    {focusMinsDisplay}:{focusSecsDisplay}
+                                </span>
+                                <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-400 flex items-center gap-0.5">
+                                    <span>Deep Work</span>
+                                    {!timerRunning && (
+                                        <svg
+                                            className="w-2.5 h-2.5 opacity-70"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                                            />
+                                        </svg>
+                                    )}
+                                </span>
+                            </div>
                         </div>
-                    </div>
+                    )}
 
+                    {/* Start / Pause & Reset Controls */}
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
-                            onClick={() => setTimerRunning((prev) => !prev)}
+                            onClick={handleToggleTimer}
                             className="px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-700 dark:text-indigo-200 border border-indigo-400/25 transition-colors flex items-center gap-1.5"
                         >
                             <span>{timerRunning ? '❚❚ Pause' : '▶ Start'}</span>
@@ -993,8 +1225,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                         type="button"
                                         onClick={() => setStatusFilter(key)}
                                         className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${active
-                                            ? 'bg-blue-600 text-white shadow-xs'
-                                            : 'bg-gray-100/80 dark:bg-white/6 text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-white/12'
+                                                ? 'bg-blue-600 text-white shadow-xs'
+                                                : 'bg-gray-100/80 dark:bg-white/6 text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-white/12'
                                             }`}
                                     >
                                         {label} ({statusCounts[key]})
@@ -1085,12 +1317,12 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                 <li
                                     key={occ.occurrence_id}
                                     className={`p-4 border rounded-2xl transition-all ${isDone
-                                        ? 'bg-emerald-500/8 dark:bg-emerald-500/10 border-emerald-300/60 dark:border-emerald-500/25'
-                                        : isSkipped || isCarriedOver
-                                            ? 'bg-gray-100/70 dark:bg-white/4 border-gray-200/70 dark:border-white/8 opacity-80'
-                                            : isNotDone
-                                                ? 'bg-red-500/8 dark:bg-red-500/10 border-red-300/60 dark:border-red-500/25'
-                                                : 'bg-white/60 dark:bg-white/5 border-gray-200/80 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/8'
+                                            ? 'bg-emerald-500/8 dark:bg-emerald-500/10 border-emerald-300/60 dark:border-emerald-500/25'
+                                            : isSkipped || isCarriedOver
+                                                ? 'bg-gray-100/70 dark:bg-white/4 border-gray-200/70 dark:border-white/8 opacity-80'
+                                                : isNotDone
+                                                    ? 'bg-red-500/8 dark:bg-red-500/10 border-red-300/60 dark:border-red-500/25'
+                                                    : 'bg-white/60 dark:bg-white/5 border-gray-200/80 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/8'
                                         }`}
                                 >
                                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3.5">
@@ -1109,8 +1341,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                 }
                                                 aria-label={`Toggle ${occ.habit_name_snapshot}`}
                                                 className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center border transition-all shrink-0 disabled:opacity-45 ${isDone
-                                                    ? 'bg-blue-500 border-blue-500 text-white shadow-xs'
-                                                    : 'border-gray-300 dark:border-white/25 hover:border-blue-400'
+                                                        ? 'bg-blue-500 border-blue-500 text-white shadow-xs'
+                                                        : 'border-gray-300 dark:border-white/25 hover:border-blue-400'
                                                     }`}
                                             >
                                                 {isDone && (
@@ -1134,20 +1366,20 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <h3
                                                         className={`font-bold text-sm sm:text-base wrap-break-word ${isDone
-                                                            ? 'text-gray-700 dark:text-slate-200'
-                                                            : 'text-gray-900 dark:text-white'
+                                                                ? 'text-gray-700 dark:text-slate-200'
+                                                                : 'text-gray-900 dark:text-white'
                                                             }`}
                                                     >
                                                         {occ.habit_name_snapshot || occ.habit_name}
                                                     </h3>
                                                     <span
                                                         className={`px-2 py-0.5 text-[11px] rounded-full font-semibold shrink-0 ${(occ.priority_snapshot ||
-                                                            occ.priority) === 'High'
-                                                            ? 'bg-red-500/15 text-red-700 dark:text-red-300'
-                                                            : (occ.priority_snapshot ||
-                                                                occ.priority) === 'Medium'
-                                                                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                                                                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                                                occ.priority) === 'High'
+                                                                ? 'bg-red-500/15 text-red-700 dark:text-red-300'
+                                                                : (occ.priority_snapshot ||
+                                                                    occ.priority) === 'Medium'
+                                                                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                                                    : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                                                             }`}
                                                     >
                                                         {occ.priority_snapshot || occ.priority}
@@ -1169,12 +1401,12 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                 <div className="flex flex-wrap items-center gap-3 mt-1.5">
                                                     <span
                                                         className={`text-[11px] font-bold uppercase tracking-wider ${isDone
-                                                            ? 'text-emerald-600 dark:text-emerald-400'
-                                                            : isNotDone
-                                                                ? 'text-red-600 dark:text-red-400'
-                                                                : isSkipped || isCarriedOver
-                                                                    ? 'text-gray-500 dark:text-slate-400'
-                                                                    : 'text-amber-600 dark:text-amber-400'
+                                                                ? 'text-emerald-600 dark:text-emerald-400'
+                                                                : isNotDone
+                                                                    ? 'text-red-600 dark:text-red-400'
+                                                                    : isSkipped || isCarriedOver
+                                                                        ? 'text-gray-500 dark:text-slate-400'
+                                                                        : 'text-amber-600 dark:text-amber-400'
                                                             }`}
                                                     >
                                                         {occ.status}
@@ -1215,8 +1447,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                     handleStatusUpdate(occ.occurrence_id, 'Done')
                                                 }
                                                 className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-full transition-colors text-center disabled:opacity-45 disabled:cursor-not-allowed ${isDone
-                                                    ? 'bg-emerald-600 text-white shadow-xs'
-                                                    : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-300'
+                                                        ? 'bg-emerald-600 text-white shadow-xs'
+                                                        : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-300'
                                                     }`}
                                             >
                                                 Done
@@ -1233,8 +1465,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                     )
                                                 }
                                                 className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-full transition-colors text-center disabled:opacity-45 disabled:cursor-not-allowed ${isNotDone
-                                                    ? 'bg-red-600 text-white shadow-xs'
-                                                    : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300'
+                                                        ? 'bg-red-600 text-white shadow-xs'
+                                                        : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300'
                                                     }`}
                                             >
                                                 Missed
@@ -1248,8 +1480,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                     handleStatusUpdate(occ.occurrence_id, 'Skipped')
                                                 }
                                                 className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-full transition-colors text-center disabled:opacity-45 disabled:cursor-not-allowed ${isSkipped
-                                                    ? 'bg-gray-600 text-white shadow-xs'
-                                                    : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/14'
+                                                        ? 'bg-gray-600 text-white shadow-xs'
+                                                        : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/14'
                                                     }`}
                                             >
                                                 Skip

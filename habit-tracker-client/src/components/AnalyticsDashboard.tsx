@@ -373,7 +373,7 @@ export const AnalyticsDashboard = () => {
 
             {/* HABIT CARDS & CATEGORY BREAKDOWN */}
             {analytics && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                     {/* Habit Streaks & Consistency Cards */}
                     <div className="lg:col-span-2 rounded-3xl bg-white dark:bg-[#16171d] border border-gray-200/80 dark:border-white/10 p-5 shadow-sm transition-colors">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">

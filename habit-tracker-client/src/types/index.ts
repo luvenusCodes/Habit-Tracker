@@ -59,6 +59,21 @@ export interface Occurrence {
     status_recorded_at?: string | null;
 }
 
+export interface UnattendedOverdueItem {
+    occurrence_id: number;
+    habit_id: number;
+    habit_name_snapshot: string;
+    category_snapshot: string;
+    priority_snapshot: 'Low' | 'Medium' | 'High';
+    occurrence_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    duration_minutes?: number | null;
+    scheduled_end_at: string;
+    carry_forward_attempt: number;
+    hours_overdue: number;
+}
+
 export interface DailyTrendPoint {
     date: string;
     total: number;

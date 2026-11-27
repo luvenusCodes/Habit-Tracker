@@ -1,4 +1,4 @@
-import type { Habit, Occurrence, Category, User, AuthResponse } from '../types';
+import type { Habit, Occurrence, Category, User, AuthResponse, UnattendedOverdueItem } from '../types';
 import type { HabitAnalyticsResponse } from '../types';
 import type { HabitSchedule, CreateSchedulePayload } from '../types';
 import type { OccurrenceHistoryItem } from '../types';
@@ -159,13 +159,9 @@ export const deleteCategory = async (categoryId: number): Promise<void> => {
 export interface OccurrenceResponse {
     date: string;
     occurrences: Occurrence[];
-    auto_missed?: {
+    unattended_overdue?: {
         count: number;
-        items: {
-            occurrence_id: number;
-            habit_name_snapshot: string;
-            occurrence_date: string;
-        }[];
+        items: UnattendedOverdueItem[];
     };
 }
 

@@ -37,54 +37,87 @@ def _enforce_six_hour_lock(current_status: str, seconds_since_recorded: Optional
             status_code=403,
         )
 
-def _sweep_unattended_occurrences(cursor, connection, user_id: int) -> List[Dict[str, Any]]:
-    today_date = date.today()
+def _find_unattended_overdue_occurrences(cursor, user_id: int) -> List[Dict[str, Any]]:
+    """
+    Finds pending occurrences whose scheduled_end_at is strickly >= 24 hours (86400s) in the past:
+    """
     cursor.execute(
         """
-        SELECT o.occurrence_id, o.habit_name_snapshot, o.occurrence_date
+        SELECT 
+            o.occurrence_id,
+            o.habit_id,
+            o.habit_name_snapshot,
+            o.category_snapshot,
+            o.priority_snapshot,
+            o.occurrence_date,
+            o.start_time,
+            o.end_time,
+            o.duration_minutes,
+            o.scheduled_end_at,
+            o.carry_forward_attempt,
+            TIMESTAMPDIFF(SECOND, o.scheduled_end_at, CURRENT_TIMESTAMP) AS seconds_overdue
         FROM habit_occurrences o
         JOIN habits h ON o.habit_id = h.habit_id
         WHERE h.user_id = %s
-            AND o.occurrence_date < %s
             AND o.status = 'Pending'
+            AND o.scheduled_end_at IS NOT NULL
+            AND TIMESTAMPDIFF(SECOND, o.scheduled_end_at, CURRENT_TIMESTAMP) >= 86400
             AND h.deleted_at IS NULL
             AND h.status != 'Deleted'
+        ORDER BY o.scheduled_end_at ASC
         """,
-        (user_id, today_date),
+        (user_id,),
     )
-    unattended_rows = cursor.fetchall()
+    rows = cursor.fetchall()
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        hours_overdue = round((row.get("seconds_overdue") or 86400) / 3600, 1)
+        items.append(
+            {
+                "occurrence_id": row["occurrence_id"],
+                "habit_id": row["habit_id"],
+                "habit_name_snapshot": row["habit_name_snapshot"],
+                "category_snapshot": row.get("category_snapshot") or "General",
+                "priority_snapshot": row.get("priority_snapshot") or "Medium",
+                "occurrence_date": str(row["occurrence_date"]),
+                "start_time": str(row["start_ime"]) if row.get("start_time") is not None else None,
+                "end_time": str(row["end_time"]) if row.get("end_time") is not None else None,
+                "duration_minutes": row.get("duration_minutes"),
+                "scheduled_end_at": str(row["scheduled_end_at"]),
+                "carry_forward_attempt": row.get("carry_forward_attempt") or 0,
+                "hours_overdue": hours_overdue,
+            }
+        )
+    return items
 
-    swept_items: List[Dict[str, Any]] = []
-    if unattended_rows:
-        for row in unattended_rows:
+def _sweep_unattended_occurrences(cursor, connection, user_id: int) -> List[Dict[str, Any]]:
+    """
+    Auto-skips Pending occurrences that are >= 24 hours past scheduled_end_at during analytics aggregation.
+    """
+    overdue_items = _find_unattended_overdue_occurrences(cursor, user_id)
+    if overdue_items:
+        for item in overdue_items:
             cursor.execute(
                 """
                 UPDATE habit_occurrences
-                SET status = 'Not Done',
+                SET status = 'Skipped',
                     final_score = 0.00,
-                    reason = 'Auto-marked Missed (unattended past date)',
+                    reason = 'Auto-skipped (unattended > 24h)',
                     status_recorded_at = CURRENT_TIMESTAMP
-                WHERE occurrence_id = %s
+                WHERE occurrence_id = %s 
                 """,
-                (row["occurrence_id"],),
+                (item["occurrence_id"],),
             )
             cursor.execute(
                 """
                 INSERT INTO occurrence_status_history
                     (occurrence_id, old_status, new_status, changed_by, changed_by_type, reason)
-                VALUES (%s, 'Pending', 'Not Done', %s, 'System', 'Auto-marked Missed (unattended past date)')
+                VALUES (%s, 'Pending', 'Skipped', %s, 'System', 'Auto-skipped (unattended > 24h)')
                 """,
-                (row["occurrence_id"], user_id),
-            )
-            swept_items.append(
-                {
-                    "occurrence_id": row["occurrence_id"],
-                    "habit_name_snapshot": row["habit_name_snapshot"],
-                    "occurrence_date": str(row["occurrence_date"]),
-                }
+                (item["occurrence_id"], user_id),
             )
         connection.commit()
-    return swept_items
+    return overdue_items
 
 def generate_occurrences_for_date(user_id: int, target_date_str: Optional[str] = None) -> Dict[str, Any]:
     connection = None
@@ -203,52 +236,8 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
 
         target_date = date_str or str(date.today())
 
-        today_date = date.today()
-        cursor.execute(
-            """
-            SELECT o.occurrence_id, o.habit_name_snapshot, o.occurrence_date
-            FROM habit_occurrences o
-            JOIN habits h ON o.habit_id = h.habit_id
-            WHERE h.user_id = %s
-                AND o.occurrence_date < %s
-                AND o.status = 'Pending'
-                AND h.deleted_at IS NULL
-                AND h.status != 'Deleted'
-            """,
-            (user_id, today_date),
-        )
-        unattended_rows = cursor.fetchall()
-
-        swept_items = []
-        if unattended_rows:
-            for row in unattended_rows:
-                cursor.execute(
-                    """
-                    UPDATE habit_occurrences
-                    SET status = 'Not Done',
-                        final_score = 0.00,
-                        reason = 'Auto-marked Missed (unattended past date)',
-                        status_recorded_at = CURRENT_TIMESTAMP
-                    WHERE occurrence_id = %s
-                    """,
-                    (row["occurrence_id"],),
-                )
-                cursor.execute(
-                    """
-                    INSERT INTO occurrence_status_history
-                        (occurrence_id, old_status, new_status, changed_by, changed_by_type, reason)
-                    VALUES (%s, 'Pending', 'Not Done', %s, 'System', 'Auto-marked Missed (unattended past date)')
-                    """,
-                    (row["occurrence_id"], user_id),
-                )
-                swept_items.append(
-                    {
-                        "occurrence_id": row["occurrence_id"],
-                        "habit_name_snapshot": row["habit_name_snapshot"],
-                        "occurrence_date": str(row["occurrence_date"]),
-                    }
-                )
-            connection.commit()
+        # Detect Pending occurrences strictly > 24 hours past scheduled_end_at (do not auto-close yet; prompt user first)
+        unattended_items = _find_unattended_overdue_occurrences(cursor, user_id)
 
         safe_query = """
             SELECT o.occurrence_id, o.habit_id, o.schedule_id, o.habit_name_snapshot,
@@ -263,7 +252,7 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
                 AND o.occurrence_date = %s
                 AND h.deleted_at IS NULL
                 AND h.status != 'Deleted'
-        """
+        """        
         cursor.execute(safe_query, (user_id, target_date))
         occurrences = cursor.fetchall()
 
@@ -280,20 +269,20 @@ def fetch_user_occurrences_for_date(user_id: int, date_str: Optional[str] = None
                 occ["status"] != "Pending" and sec is not None and sec >= 6 * 3600
             )
             if occ.get("status_recorded_at") is not None:
-                occ["status_recorded_at"] = str(occ["status_recorded_at"])
+                occ["status_recorded_at"] = str(occ["status_recordede_at"])
 
         return {
             "date": target_date,
             "occurrences": occurrences,
-            "auto_missed": {
-                "count": len(swept_items),
-                "items": swept_items,
+            "unattended_overdue": {
+                "count": len(unattended_items),
+                "items": unattended_items,
             },
         }
 
     except Exception:
         if connection:
-            connection.rollback();
+            connection.rollback()
         raise
 
     finally:

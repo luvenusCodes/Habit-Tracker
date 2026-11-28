@@ -22,11 +22,13 @@ export default function AppLayout({
     onLogout,
 }: AppLayoutProps) {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     const handleSelectTab = (tab: NavTab) => {
         onTabChange(tab);
         setIsMobileMenuOpen(false);
+        setIsAddMenuOpen(false);
     };
 
     const greeting = (() => {
@@ -96,7 +98,7 @@ export default function AppLayout({
         { tab: 'settings', label: 'Settings', icon: settingsIcon },
     ];
 
-    const bottomTabs: { key: BottomTabKey; targetTab: NavTab; label: string; icon: React.ReactNode }[] = [
+    const bottomTabs: { key: BottomTabKey; targetTab?: NavTab; label: string; icon: React.ReactNode }[] = [
         {
             key: 'dashboard',
             targetTab: 'dashboard',
@@ -119,7 +121,6 @@ export default function AppLayout({
         },
         {
             key: 'add',
-            targetTab: 'habits',
             label: 'Add',
             icon: (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -149,7 +150,44 @@ export default function AppLayout({
         },
     ];
 
+    const quickCreateLinks: { tab: NavTab; title: string; subtitle: string; badgeClass: string; icon: React.ReactNode }[] = [
+        {
+            tab: 'habits',
+            title: 'New Habit',
+            subtitle: 'Daily or weekly routine',
+            badgeClass: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+            icon: (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+            ),
+        },
+        {
+            tab: 'goals',
+            title: 'New Goal',
+            subtitle: 'Long-term milestone target',
+            badgeClass: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400',
+            icon: (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+            ),
+        },
+        {
+            tab: 'categories',
+            title: 'New Category',
+            subtitle: 'Organize habits by area',
+            badgeClass: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+            icon: (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+            ),
+        },
+    ];
+
     const activeBottomIndex = (() => {
+        if (isAddMenuOpen) return 2;
         if (activeTab === 'dashboard') return 0;
         if (activeTab === 'habits') return 1;
         if (activeTab === 'analytics') return 3;
@@ -280,7 +318,7 @@ export default function AppLayout({
             </aside>
 
             {/* MOBILE TOP NAVBAR */}
-            <header className="md:hidden flex items-center justify-between bg-white/95 dark:bg-[#13151c]/95 backdrop-blur-md border-b border-gray-200 dark:border-white/10 px-4 py-3 sticky top-0 z-30 transition-colors">
+            <header className="md:hidden flex items-center justify-between bg-white/95 dark:bg-[#0c0d10]/95 backdrop-blur-md border-b border-gray-200 dark:border-white/10 px-4 py-3 sticky top-0 z-30 transition-colors">
                 <div className="flex items-center gap-2.5 min-w-0">
                     {avatarUrl ? (
                         <img
@@ -306,7 +344,10 @@ export default function AppLayout({
                 </div>
                 <button
                     type="button"
-                    onClick={() => setIsMobileMenuOpen(true)}
+                    onClick={() => {
+                        setIsAddMenuOpen(false);
+                        setIsMobileMenuOpen(true);
+                    }}
                     className="p-2 rounded-xl bg-gray-100/80 dark:bg-white/6 border border-gray-200/80 dark:border-white/10 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/10 focus:outline-none transition-colors"
                     aria-label="Open Navigation Drawer"
                 >
@@ -321,19 +362,16 @@ export default function AppLayout({
                 className={`md:hidden fixed inset-0 z-50 transition-opacity duration-300 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
                     }`}
             >
-                {/* Frosted Backdrop */}
                 <div
                     onClick={() => setIsMobileMenuOpen(false)}
                     className="absolute inset-0 bg-black/65 backdrop-blur-xs"
                 />
 
-                {/* Floating Rounded Sidebar Card */}
                 <aside
                     className={`absolute top-3 right-3 bottom-3 w-64 max-w-[82vw] rounded-[26px] bg-white dark:bg-[#17181d] border border-gray-200/90 dark:border-white/10 shadow-2xl p-3.5 flex flex-col justify-between transition-transform duration-300 ease-out ${isMobileMenuOpen ? 'translate-x-0' : 'translate-x-[112%]'
                         }`}
                 >
                     <div>
-                        {/* User Profile Row + Close Button */}
                         <div className="flex items-center justify-between gap-2.5 px-1.5 pt-1 pb-3.5">
                             <div className="flex items-center gap-2.5 min-w-0">
                                 {avatarUrl ? (
@@ -369,7 +407,6 @@ export default function AppLayout({
                             </button>
                         </div>
 
-                        {/* Navigation Items with Sleek Inverted Active Pill */}
                         <nav className="space-y-1 mt-1">
                             {mobileSidebarItems.map((item) => {
                                 const isActive = activeTab === item.tab;
@@ -391,7 +428,6 @@ export default function AppLayout({
                         </nav>
                     </div>
 
-                    {/* Bottom Divider + Log Out */}
                     <div className="pt-3 border-t border-gray-200/80 dark:border-white/10">
                         <button
                             type="button"
@@ -417,12 +453,51 @@ export default function AppLayout({
                 </div>
             </main>
 
-            {/* MOBILE 5-TAB CONCAVE-NOTCH BOTTOM NAVIGATION BAR */}
+            {/* BACKDROP FOR QUICK-CREATE ADD POPOVER */}
+            {isAddMenuOpen && (
+                <div
+                    onClick={() => setIsAddMenuOpen(false)}
+                    className="md:hidden fixed inset-0 z-35 bg-black/50 backdrop-blur-[2px] transition-opacity"
+                />
+            )}
+
+            {/* MOBILE 5-TAB CONCAVE-NOTCH BOTTOM NAVIGATION BAR + ADD POPOVER */}
             <nav
                 aria-label="Mobile Bottom Navigation"
                 className={`md:hidden fixed left-3 right-3 z-40 mobile-nav-wrap transition-all duration-300 ${isMobileMenuOpen ? 'opacity-35 scale-[0.97] pointer-events-none' : 'opacity-100 scale-100'
                     }`}
             >
+                {/* Quick-Create Prompt Card Above "Add" */}
+                {isAddMenuOpen && (
+                    <div className="mb-8 mx-auto w-64 rounded-2xl bg-white/98 dark:bg-[#191c25]/98 backdrop-blur-xl border border-gray-200 dark:border-white/12 shadow-[0_18px_40px_rgba(0,0,0,0.5)] p-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                        <p className="px-2.5 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-slate-400">
+                            Quick Create
+                        </p>
+                        <div className="space-y-1">
+                            {quickCreateLinks.map((item) => (
+                                <button
+                                    key={item.tab}
+                                    type="button"
+                                    onClick={() => handleSelectTab(item.tab)}
+                                    className="w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors"
+                                >
+                                    <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.badgeClass}`}>
+                                        {item.icon}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-bold text-gray-900 dark:text-white leading-tight">
+                                            {item.title}
+                                        </p>
+                                        <p className="text-[10px] text-gray-500 dark:text-slate-400 truncate">
+                                            {item.subtitle}
+                                        </p>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 <div className="relative h-17 mx-auto max-w-md">
                     {/* Floating Lifted Emerald Orb */}
                     {activeBottomIndex >= 0 && (
@@ -430,7 +505,12 @@ export default function AppLayout({
                             style={{ left: `${notchCenterPercent}%` }}
                             className="absolute -top-5 -translate-x-1/2 w-12.5 h-12.5 rounded-full bg-emerald-500 text-[#07130e] flex items-center justify-center shadow-[0_10px_24px_rgba(16,185,129,0.42)] ring-4 ring-gray-50 dark:ring-[#0c0d10] transition-all duration-300 ease-out z-20 pointer-events-none"
                         >
-                            {bottomTabs[activeBottomIndex].icon}
+                            <span
+                                className={`transition-transform duration-200 ${isAddMenuOpen ? 'rotate-45' : 'rotate-0'
+                                    }`}
+                            >
+                                {bottomTabs[activeBottomIndex].icon}
+                            </span>
                         </div>
                     )}
 
@@ -452,7 +532,13 @@ export default function AppLayout({
                                 <button
                                     key={tab.key}
                                     type="button"
-                                    onClick={() => handleSelectTab(tab.targetTab)}
+                                    onClick={() => {
+                                        if (tab.key === 'add') {
+                                            setIsAddMenuOpen((prev) => !prev);
+                                        } else if (tab.targetTab) {
+                                            handleSelectTab(tab.targetTab);
+                                        }
+                                    }}
                                     className="h-full flex flex-col items-center justify-center pt-1.5 pb-1 focus:outline-none select-none"
                                 >
                                     <span
@@ -469,7 +555,7 @@ export default function AppLayout({
                                             : 'font-medium text-gray-500 dark:text-slate-400'
                                             }`}
                                     >
-                                        {tab.label}
+                                        {tab.key === 'add' && isAddMenuOpen ? 'Close' : tab.label}
                                     </span>
                                 </button>
                             );

@@ -118,6 +118,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             if (data.theme) {
                 applyTheme(data.theme as ThemePreference);
             }
+            if (data.avatar_url !== undefined) {
+                const userKey = (username || localStorage.getItem('username') || 'default').trim();
+                setLocalAvatar(data.avatar_url);
+                onAvatarChange?.(data.avatar_url);
+                if (data.avatar_url) {
+                    localStorage.setItem(`habit_avatar_${userKey}`, data.avatar_url);
+                } else {
+                    localStorage.removeItem(`habit_avatar_${userKey}`);
+                }
+            }
         } catch (err) {
             console.error('Failed to load user settings', err);
         } finally {
@@ -157,18 +167,25 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             localStorage.setItem(`habit_avatar_${userKey}`, optimizedDataUrl);
             setLocalAvatar(optimizedDataUrl);
             onAvatarChange?.(optimizedDataUrl);
-            setBanner({ type: 'success', text: 'Profile picture updated.' });
+
+            await updateUserProfile({ avatar_url: optimizedDataUrl });
+            setBanner({ type: 'success', text: 'Profile picture updated & synced!' });
         } catch (err) {
-            setBanner({ type: 'error', text: (err as Error).message });
+            setBanner({ type: 'error', text: (err as Error).message || 'Saved locally, but could not sync photo to server.', });
         }
     };
 
-    const handleRemoveAvatar = () => {
+    const handleRemoveAvatar = async () => {
         const userKey = (username || localStorage.getItem('username') || 'default').trim();
         localStorage.removeItem(`habit_avatar_${userKey}`);
         setLocalAvatar(null);
         onAvatarChange?.(null);
-        setBanner({ type: 'success', text: 'Profile picture removed.' });
+        try {
+            await updateUserProfile({ avatar_url: null });
+            setBanner({ type: 'success', text: 'Profile picture removed.' });
+        } catch {
+            setBanner({ type: 'success', text: 'Profile picture removed locally.' });
+        }
     };
 
     const handleSaveProfile = async (e: React.FormEvent) => {
@@ -320,8 +337,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             {banner && (
                 <div
                     className={`p-3 rounded-2xl text-xs font-medium flex items-center justify-between border ${banner.type === 'success'
-                            ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
-                            : 'bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/60'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                        : 'bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/60'
                         }`}
                 >
                     <span>{banner.text}</span>
@@ -495,8 +512,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         aria-checked={notificationsEnabled}
                         onClick={handleNotificationsToggle}
                         className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${notificationsEnabled
-                                ? 'bg-indigo-600 dark:bg-lime-400'
-                                : 'bg-gray-200 dark:bg-white/15'
+                            ? 'bg-indigo-600 dark:bg-lime-400'
+                            : 'bg-gray-200 dark:bg-white/15'
                             }`}
                     >
                         <span
@@ -646,8 +663,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                                         type="button"
                                         onClick={() => handleThemeSelect(mode)}
                                         className={`px-2 py-0.5 rounded-md text-[10px] font-semibold capitalize transition-colors ${settings.theme === mode
-                                                ? 'bg-indigo-600 dark:bg-lime-400 text-white dark:text-gray-950'
-                                                : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-white/8'
+                                            ? 'bg-indigo-600 dark:bg-lime-400 text-white dark:text-gray-950'
+                                            : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-white/8'
                                             }`}
                                     >
                                         {mode}
@@ -663,8 +680,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         aria-checked={isDarkVisual}
                         onClick={handleDarkSwitchToggle}
                         className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${isDarkVisual
-                                ? 'bg-indigo-600 dark:bg-lime-400'
-                                : 'bg-gray-200 dark:bg-white/15'
+                            ? 'bg-indigo-600 dark:bg-lime-400'
+                            : 'bg-gray-200 dark:bg-white/15'
                             }`}
                     >
                         <span

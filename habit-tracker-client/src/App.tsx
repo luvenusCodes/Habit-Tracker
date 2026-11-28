@@ -43,6 +43,14 @@ function App() {
           if (settings?.theme) {
             applyTheme(settings.theme as ThemePreference);
           }
+          if (settings?.avatar_url !== undefined) {
+            setAvatarUrl(settings.avatar_url);
+            if (settings.avatar_url) {
+              localStorage.setItem(`habit_avatar_${userKey}`, settings.avatar_url);
+            } else {
+              localStorage.removeItem(`habit_avatar_${userKey}`);
+            }
+          }
         })
         .catch(() => {
           // keep cached localstorage theme if request fails

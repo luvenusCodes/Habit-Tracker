@@ -1,12 +1,14 @@
 import os
 import re
-from pydantic import BaseModel, EmailStr, field_validator
+import secrets
 from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 from storage.habits_storage import get_db_connection
 from utils.email_service import send_otp_email
@@ -21,6 +23,7 @@ from utils.security import (
 
 load_dotenv(override=False)
 SECRET_KEY = os.environ["JWT_SECRET_KEY"]
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 ALGORITHM = "HS256"
 MAX_OTP_ATTEMPTS = 5
 
@@ -41,10 +44,12 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     except JWTError:
         raise HTTPException(status_code=401, detail="Could not validate credentials.")
 
+
 PASSWORD_POLICY_MSG = (
     "Password must be at least 8 characters long and include at least "
     "one uppercase letter, one lowercase letter, and one special character."
 )
+
 
 def validate_password_strength(password: str) -> str:
     if (
@@ -55,6 +60,7 @@ def validate_password_strength(password: str) -> str:
     ):
         raise ValueError(PASSWORD_POLICY_MSG)
     return password
+
 
 # Pydantic Schemas
 class UserRegister(BaseModel):
@@ -71,6 +77,10 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     username: str
     password: str
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str
 
 
 class SendOtpRequest(BaseModel):
@@ -156,6 +166,23 @@ def _validate_otp(connection, cursor, user_id: int, token_type: str, submitted_c
     return otp_record["token_id"]
 
 
+def _generate_unique_username(cursor, base_name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "", base_name.replace(" ", "_")).lower()
+    if len(cleaned) < 3:
+        cleaned = f"user_{secrets.token_hex(3)}"
+    cleaned = cleaned[:24]
+
+    candidate = cleaned
+    counter = 1
+    while True:
+        cursor.execute("SELECT user_id FROM users WHERE username = %s", (candidate,))
+        if not cursor.fetchone():
+            return candidate
+        suffix = f"_{counter}"
+        candidate = f"{cleaned[: 24 - len(suffix)]}{suffix}"
+        counter += 1
+
+
 # Register User
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register_user(user: UserRegister):
@@ -224,6 +251,88 @@ def login_user(user: UserLogin):
             "token_type": "bearer",
             "user_id": db_user["user_id"],
             "username": db_user["username"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+    finally:
+        if cursor:
+            cursor.close()
+        if connection and connection.is_connected():
+            connection.close()
+
+
+# Google OAuth Login / Auto-Registration
+@router.post("/google", dependencies=[Depends(login_rate_limiter)])
+def google_auth(payload: GoogleAuthRequest):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="Google OAuth is not configured on the server.",
+        )
+
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            payload.credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid or expired Google credential.")
+
+    email = idinfo.get("email")
+    if not email or not idinfo.get("email_verified"):
+        raise HTTPException(status_code=400, detail="Google account email is not verified.")
+
+    picture_url = idinfo.get("picture")
+    display_name = idinfo.get("name") or email.split("@")[0]
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute(
+            "SELECT user_id, username, avatar_url FROM users WHERE email = %s",
+            (email,),
+        )
+        db_user = cursor.fetchone()
+
+        if db_user:
+            user_id = db_user["user_id"]
+            username = db_user["username"]
+            if picture_url and not db_user.get("avatar_url"):
+                cursor.execute(
+                    "UPDATE users SET avatar_url = %s WHERE user_id = %s",
+                    (picture_url, user_id),
+                )
+                connection.commit()
+        else:
+            username = _generate_unique_username(cursor, display_name)
+            random_pw_hash = hash_password(f"Ggl!{secrets.token_urlsafe(24)}9a")
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, password_hash, avatar_url)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (username, email, random_pw_hash, picture_url),
+            )
+            user_id = cursor.lastrowid
+            connection.commit()
+
+        access_token = create_access_token(
+            data={"sub": username, "user_id": user_id}
+        )
+
+        return {
+            "message": "Google authentication successful",
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user_id": user_id,
+            "username": username,
         }
 
     except HTTPException:

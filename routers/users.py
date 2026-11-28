@@ -20,6 +20,7 @@ class UserSettingsResponse(BaseModel):
     reminder_time: str
     timezone: str
     theme: str
+    avatar_url: Optional[str] = None
 
 class UserSettingsUpdate(BaseModel):
     email_notifications: Optional[bool] = None
@@ -31,6 +32,7 @@ class UserSettingsUpdate(BaseModel):
 class UserProfileUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 @router.get("/")
 def get_users():
@@ -42,30 +44,34 @@ class User:
         username,
         email,
         user_id=None,
-        password_hash=None
+        password_hash=None,
+        avatar_url=None
     ):
         self.user_id = user_id
         self.username = username
         self.email = email
         self.password_hash = password_hash
+        self.avatar_url = avatar_url
 
     def set_password(self, plain_password: str):
         # Hashes a plain_text password and stores it.
         password_bytes = plain_password.encode('utf-8')[:72]
         salt = bcrypt.gensalt()
         self.password_hash = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+
     def to_dict(self):
         return {
             "user_id": self.user_id,
             "username": self.username,
             "email": self.email,
-            "password_hash" : self.password_hash
+            "password_hash": self.password_hash,
+            "avatar_url": self.avatar_url
         }
 
 # Endpoints
 @router.get("/settings", response_model=UserSettingsResponse)
 def get_user_settings(current_user: dict = Depends(get_current_user)):
-    user_id = current_user.get("user_id")or current_user.get("id")
+    user_id = current_user.get("user_id") or current_user.get("id")
     settings = get_user_settings_from_db(user_id)
     if not settings:
         raise HTTPException(status_code=404, detail="Settings not found")
@@ -96,5 +102,6 @@ def update_user_profile(
     return {
         "message": "Profile updated successfully",
         "username": updated_user.get("username"),
-        "email": updated_user.get("email")
+        "email": updated_user.get("email"),
+        "avatar_url": updated_user.get("avatar_url")
     }

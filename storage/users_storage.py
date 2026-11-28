@@ -59,7 +59,7 @@ def get_user_by_username(username):
         cursor = connection.cursor(dictionary=True)
 
         query = """
-            SELECT username, user_id, email, password_hash
+            SELECT username, user_id, email, password_hash, avatar_url
             FROM USERS
             WHERE username = %s
         """
@@ -85,7 +85,7 @@ def get_user_by_email(email: str):
         cursor = connection.cursor(dictionary=True)
 
         query = """
-            SELECT username, user_id, email, password_hash
+            SELECT username, user_id, email, password_hash, avatar_url
             FROM USERS
             WHERE email = %s
         """
@@ -111,9 +111,16 @@ def get_user_settings_from_db(user_id: int):
         cursor = connection.cursor(dictionary=True)
 
         query = """
-            SELECT email_notifications, push_notifications, reminder_time, timezone, theme
-            FROM user_settings
-            WHERE user_id = %s
+            SELECT
+                s.email_notifications,
+                s.push_notifications,
+                s.reminder_time,
+                s.timezone,
+                s.theme,
+                u.avatar_url
+            FROM user_settings s
+            JOIN USERS u ON u.user_id = s.user_id
+            WHERE s.user_id = %s
         """
         cursor.execute(query, (user_id,))
         settings = cursor.fetchone()
@@ -184,7 +191,7 @@ def update_user_profile_in_db(user_id: int, profile_dict: dict):
         fields = []
         values = []
         for key, val in profile_dict.items():
-            if val is not None:
+            if val is not None or key == "avatar_url":
                 fields.append(f"{key} = %s")
                 values.append(val)
 
@@ -216,7 +223,10 @@ def get_user_by_id_basic(user_id: int):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT user_id, username, email FROM USERS WHERE user_id = %s", (user_id,))
+        cursor.execute(
+            "SELECT user_id, username, email, avatar_url FROM USERS WHERE user_id = %s",
+            (user_id,),
+        )
         return cursor.fetchone()
     finally:
         cursor.close()

@@ -128,9 +128,13 @@ def update_user_profile(
         raise HTTPException(status_code=401, detail="Could not resolve user identity")
 
     update_data = profile.dict(exclude_unset=True)
-    updated_user = update_user_profile_in_db(user_id, update_data)
+    try:
+        updated_user = update_user_profile_in_db(user_id, update_data)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     if not updated_user:
-        raise HTTPException(status_code=400, detail="Failed to update profile")
+        raise HTTPException(status_code=400, detail=f"User {user_id} not found after update")
 
     return {
         "message": "Profile updated successfully",

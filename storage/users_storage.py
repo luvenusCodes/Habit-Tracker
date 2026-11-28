@@ -186,6 +186,8 @@ def update_user_profile_in_db(user_id: int, profile_dict: dict):
     cursor = None
     try:
         connection = get_db_connection()
+        if not connection:
+            raise RuntimeError("Database connection returned None")
         cursor = connection.cursor()
 
         fields = []
@@ -196,7 +198,7 @@ def update_user_profile_in_db(user_id: int, profile_dict: dict):
                 values.append(val)
 
         if not fields:
-            return None
+            raise ValueError(f"No valid fields in payload: {list(profile_dict.keys())}")
 
         values.append(user_id)
         query = f"UPDATE USERS SET {', '.join(fields)} WHERE user_id = %s"
@@ -206,17 +208,11 @@ def update_user_profile_in_db(user_id: int, profile_dict: dict):
 
         return get_user_by_id_basic(user_id)
 
-    except mysql.connector.Error as err:
+    except Exception as err:
         if connection:
             connection.rollback()
-        print(f"MySQL Error occurred: {err}")
-        return None
-
-    finally:
-        if cursor:
-            cursor.close()
-        if connection and connection.is_connected():
-            connection.close()
+        print(f"Profile update error: {err}", flush=True)
+        raise
 
 
 def get_user_by_id_basic(user_id: int):

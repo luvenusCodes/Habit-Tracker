@@ -171,7 +171,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             await updateUserProfile({ avatar_url: optimizedDataUrl });
             setBanner({ type: 'success', text: 'Profile picture updated & synced!' });
         } catch (err) {
-            setBanner({ type: 'error', text: (err as Error).message || 'Saved locally, but could not sync photo to server.', });
+            setBanner({ type: 'error', text: 'Saved on this device, but could not sync your profile picture to the cloud. Please try a smaller image', });
         }
     };
 

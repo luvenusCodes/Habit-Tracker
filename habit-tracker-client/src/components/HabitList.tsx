@@ -252,26 +252,26 @@ export const HabitList = () => {
                             >
                                 <span
                                     className={`text-[11px] font-semibold ${isSelected
-                                            ? 'text-gray-900 dark:text-white'
-                                            : 'text-gray-400 dark:text-slate-500'
+                                        ? 'text-gray-900 dark:text-white'
+                                        : 'text-gray-400 dark:text-slate-500'
                                         }`}
                                 >
                                     {day.weekday}
                                 </span>
                                 <div
                                     className={`w-full max-w-12 aspect-square rounded-2xl flex items-center justify-center text-sm font-bold transition-all backdrop-blur-xl border ${isSelected
-                                            ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-950 border-gray-900 dark:border-white shadow-md scale-105'
-                                            : day.isFuture
-                                                ? 'bg-white/45 dark:bg-white/3 border-gray-200/60 dark:border-white/6 text-gray-400 dark:text-slate-500'
-                                                : 'bg-white/75 dark:bg-white/6 border-gray-200/80 dark:border-white/10 text-gray-800 dark:text-slate-200 hover:bg-white dark:hover:bg-white/10'
+                                        ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-950 border-gray-900 dark:border-white shadow-md scale-105'
+                                        : day.isFuture
+                                            ? 'bg-white/45 dark:bg-white/3 border-gray-200/60 dark:border-white/6 text-gray-400 dark:text-slate-500'
+                                            : 'bg-white/75 dark:bg-white/6 border-gray-200/80 dark:border-white/10 text-gray-800 dark:text-slate-200 hover:bg-white dark:hover:bg-white/10'
                                         }`}
                                 >
                                     {day.dayNum}
                                 </div>
                                 <span
                                     className={`h-1 w-4 rounded-full transition-opacity ${isSelected
-                                            ? 'bg-gray-900 dark:bg-amber-400 opacity-100'
-                                            : 'opacity-0'
+                                        ? 'bg-gray-900 dark:bg-amber-400 opacity-100'
+                                        : 'opacity-0'
                                         }`}
                                 />
                             </button>
@@ -417,8 +417,8 @@ export const HabitList = () => {
                                 )
                             }
                             className={`text-left p-4 rounded-3xl backdrop-blur-xl transition-all border ${isSelected
-                                    ? `bg-white/95 dark:bg-white/12 ring-2 ${pillar.ringClass} shadow-md`
-                                    : 'bg-white/75 dark:bg-white/6 border-gray-200/80 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/9'
+                                ? `bg-white/95 dark:bg-white/12 ring-2 ${pillar.ringClass} shadow-md`
+                                : 'bg-white/75 dark:bg-white/6 border-gray-200/80 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/9'
                                 }`}
                         >
                             <div className="flex items-center justify-between gap-2">
@@ -497,8 +497,8 @@ export const HabitList = () => {
                             type="button"
                             onClick={() => setSelectedCategoryFilter('ALL')}
                             className={`px-3.5 py-1.5 text-xs font-semibold rounded-full transition-colors backdrop-blur-xl border ${selectedCategoryFilter === 'ALL'
-                                    ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-950 border-gray-900 dark:border-white'
-                                    : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-slate-300 border-gray-200/80 dark:border-white/10 hover:bg-white dark:hover:bg-white/10'
+                                ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-950 border-gray-900 dark:border-white'
+                                : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-slate-300 border-gray-200/80 dark:border-white/10 hover:bg-white dark:hover:bg-white/10'
                                 }`}
                         >
                             All Categories ({habits.length})
@@ -516,8 +516,8 @@ export const HabitList = () => {
                                     type="button"
                                     onClick={() => setSelectedCategoryFilter(idStr)}
                                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-full transition-colors backdrop-blur-xl border ${active
-                                            ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-950 border-gray-900 dark:border-white'
-                                            : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-slate-300 border-gray-200/80 dark:border-white/10 hover:bg-white dark:hover:bg-white/10'
+                                        ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-950 border-gray-900 dark:border-white'
+                                        : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-slate-300 border-gray-200/80 dark:border-white/10 hover:bg-white dark:hover:bg-white/10'
                                         }`}
                                 >
                                     {cat.category_name} ({count})
@@ -692,10 +692,10 @@ export const HabitList = () => {
                                                 <div className="flex items-start gap-3.5 min-w-0 flex-1">
                                                     <div
                                                         className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 font-black text-sm border ${habit.priority === 'High'
-                                                                ? 'bg-rose-500/12 border-rose-400/30 text-rose-600 dark:text-rose-300'
-                                                                : habit.priority === 'Medium'
-                                                                    ? 'bg-amber-500/12 border-amber-400/30 text-amber-600 dark:text-amber-300'
-                                                                    : 'bg-violet-500/12 border-violet-400/30 text-violet-600 dark:text-violet-300'
+                                                            ? 'bg-rose-500/12 border-rose-400/30 text-rose-600 dark:text-rose-300'
+                                                            : habit.priority === 'Medium'
+                                                                ? 'bg-amber-500/12 border-amber-400/30 text-amber-600 dark:text-amber-300'
+                                                                : 'bg-violet-500/12 border-violet-400/30 text-violet-600 dark:text-violet-300'
                                                             }`}
                                                     >
                                                         {habit.habit_name.slice(0, 2).toUpperCase()}
@@ -724,10 +724,10 @@ export const HabitList = () => {
 
                                                             <span
                                                                 className={`px-2.5 py-0.5 text-[11px] rounded-full font-semibold border ${habit.priority === 'High'
-                                                                        ? 'bg-rose-500/12 text-rose-700 dark:text-rose-300 border-rose-400/25'
-                                                                        : habit.priority === 'Medium'
-                                                                            ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-400/25'
-                                                                            : 'bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-400/25'
+                                                                    ? 'bg-rose-500/12 text-rose-700 dark:text-rose-300 border-rose-400/25'
+                                                                    : habit.priority === 'Medium'
+                                                                        ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-400/25'
+                                                                        : 'bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-400/25'
                                                                     }`}
                                                             >
                                                                 {habit.priority}
@@ -735,9 +735,9 @@ export const HabitList = () => {
 
                                                             <span
                                                                 className={`px-2.5 py-0.5 text-[11px] rounded-full font-semibold ${(habit.status || 'Active') ===
-                                                                        'Active'
-                                                                        ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
-                                                                        : 'bg-gray-200/80 dark:bg-white/10 text-gray-600 dark:text-slate-300'
+                                                                    'Active'
+                                                                    ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                                                                    : 'bg-gray-200/80 dark:bg-white/10 text-gray-600 dark:text-slate-300'
                                                                     }`}
                                                             >
                                                                 {habit.status || 'Active'}
@@ -785,9 +785,9 @@ export const HabitList = () => {
                                                                 )
                                                             }
                                                             className={`px-3.5 py-1.5 text-xs font-bold rounded-full border transition-colors mr-auto ${openScheduleHabitId ===
-                                                                    habit.habit_id
-                                                                    ? 'bg-gray-900 dark:bg-amber-400 text-white dark:text-gray-950 border-transparent'
-                                                                    : 'bg-white/70 dark:bg-white/6 border-gray-200 dark:border-white/12 text-indigo-600 dark:text-amber-300 hover:bg-white dark:hover:bg-white/12'
+                                                                habit.habit_id
+                                                                ? 'bg-gray-900 dark:bg-amber-400 text-white dark:text-gray-950 border-transparent'
+                                                                : 'bg-white/70 dark:bg-white/6 border-gray-200 dark:border-white/12 text-indigo-600 dark:text-amber-300 hover:bg-white dark:hover:bg-white/12'
                                                                 }`}
                                                         >
                                                             {openScheduleHabitId === habit.habit_id
@@ -839,7 +839,7 @@ export const HabitList = () => {
                     setShowCreateDrawer((prev) => !prev);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                className="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-gray-900 hover:bg-gray-800 dark:bg-amber-400 dark:hover:bg-amber-300 text-white dark:text-gray-950 shadow-xl flex items-center justify-center text-2xl font-light transition-transform active:scale-95"
+                className="fixed bottom-24 md:bottom-6 right-5 md:right-6 z-30 w-14 h-14 rounded-full bg-gray-900 hover:bg-gray-800 dark:bg-amber-400 dark:hover:bg-amber-300 text-white dark:text-gray-950 shadow-xl flex items-center justify-center text-2xl font-light transition-transform active:scale-95"
             >
                 {showCreateDrawer ? '×' : '+'}
             </button>

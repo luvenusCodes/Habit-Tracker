@@ -1,6 +1,6 @@
 import bcrypt
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -9,10 +9,10 @@ from storage.users_storage import (
     get_user_by_username,
     get_user_settings_from_db,
     update_user_settings_in_db,
-    update_user_profile_in_db
+    update_user_profile_in_db,
 )
 
-router = APIRouter(prefix="/users", tags=["Users & Setttings"])
+router = APIRouter(prefix="/users", tags=["Users & Settings"])
 
 
 # Pydantic Schemas
@@ -51,7 +51,7 @@ class User:
         email,
         user_id=None,
         password_hash=None,
-        avatar_url=None
+        avatar_url=None,
     ):
         self.user_id = user_id
         self.username = username
@@ -60,10 +60,9 @@ class User:
         self.avatar_url = avatar_url
 
     def set_password(self, plain_password: str):
-        # Hashes a plain_text password and stores it.
-        password_bytes = plain_password.encode('utf-8')[:72]
+        password_bytes = plain_password.encode("utf-8")[:72]
         salt = bcrypt.gensalt()
-        self.password_hash = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+        self.password_hash = bcrypt.hashpw(password_bytes, salt).decode("utf-8")
 
     def to_dict(self):
         return {
@@ -71,7 +70,7 @@ class User:
             "username": self.username,
             "email": self.email,
             "password_hash": self.password_hash,
-            "avatar_url": self.avatar_url
+            "avatar_url": self.avatar_url,
         }
 
 
@@ -105,13 +104,13 @@ def get_user_settings(current_user: dict = Depends(get_current_user)):
 @router.patch("/settings", response_model=UserSettingsResponse)
 def update_user_settings(
     settings: UserSettingsUpdate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     user_id = _resolve_user_id(current_user)
     if not user_id:
         raise HTTPException(status_code=401, detail="Could not resolve user identity")
 
-    update_data = settings.dict(exclude_unset=True)
+    update_data = settings.model_dump(exclude_unset=True)
     updated_settings = update_user_settings_in_db(user_id, update_data)
     if not updated_settings:
         raise HTTPException(status_code=400, detail="Failed to update settings")
@@ -121,24 +120,20 @@ def update_user_settings(
 @router.patch("/profile")
 def update_user_profile(
     profile: UserProfileUpdate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     user_id = _resolve_user_id(current_user)
     if not user_id:
         raise HTTPException(status_code=401, detail="Could not resolve user identity")
 
-    update_data = profile.dict(exclude_unset=True)
-    try:
-        updated_user = update_user_profile_in_db(user_id, update_data)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
+    update_data = profile.model_dump(exclude_unset=True)
+    updated_user = update_user_profile_in_db(user_id, update_data)
     if not updated_user:
-        raise HTTPException(status_code=400, detail=f"User {user_id} not found after update")
+        raise HTTPException(status_code=400, detail="Failed to update profile")
 
     return {
         "message": "Profile updated successfully",
         "username": updated_user.get("username"),
         "email": updated_user.get("email"),
-        "avatar_url": updated_user.get("avatar_url")
+        "avatar_url": updated_user.get("avatar_url"),
     }

@@ -1,7 +1,10 @@
 import datetime
+import logging
 import mysql.connector
 
 from storage.connection import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 def save_user_to_mysql(user_dict):
@@ -10,13 +13,13 @@ def save_user_to_mysql(user_dict):
     try:
         connection = get_db_connection()
         if not connection:
-            print("Database connection failed")
+            logger.error("Database connection failed while saving user")
             return False
 
         cursor = connection.cursor()
 
         query = """
-            INSERT INTO USERS (username, email, password_hash)
+            INSERT INTO users (username, email, password_hash)
             VALUES (%s, %s, %s)
         """
         values = (
@@ -35,13 +38,12 @@ def save_user_to_mysql(user_dict):
         cursor.execute(query_settings, (user_id,))
 
         connection.commit()
-        print(f"Successfully saved user '{user_dict['username']}' and default settings to MySQL!")
         return True
 
     except mysql.connector.Error as err:
         if connection:
             connection.rollback()
-        print(f"MySQL Error occurred: {err}")
+        logger.error("MySQL error in save_user_to_mysql: %s", err)
         return False
 
     finally:
@@ -56,18 +58,20 @@ def get_user_by_username(username):
     cursor = None
     try:
         connection = get_db_connection()
+        if not connection:
+            return None
         cursor = connection.cursor(dictionary=True)
 
         query = """
             SELECT username, user_id, email, password_hash, avatar_url
-            FROM USERS
+            FROM users
             WHERE username = %s
         """
         cursor.execute(query, (username,))
         return cursor.fetchone()
 
     except mysql.connector.Error as err:
-        print(f"MySQL Error occurred: {err}")
+        logger.error("MySQL error in get_user_by_username: %s", err)
         return None
 
     finally:
@@ -82,18 +86,20 @@ def get_user_by_email(email: str):
     cursor = None
     try:
         connection = get_db_connection()
+        if not connection:
+            return None
         cursor = connection.cursor(dictionary=True)
 
         query = """
             SELECT username, user_id, email, password_hash, avatar_url
-            FROM USERS
+            FROM users
             WHERE email = %s
         """
         cursor.execute(query, (email,))
         return cursor.fetchone()
 
     except mysql.connector.Error as err:
-        print(f"MySQL Error occurred: {err}")
+        logger.error("MySQL error in get_user_by_email: %s", err)
         return None
 
     finally:
@@ -108,6 +114,8 @@ def get_user_settings_from_db(user_id: int):
     cursor = None
     try:
         connection = get_db_connection()
+        if not connection:
+            return None
         cursor = connection.cursor(dictionary=True)
 
         query = """
@@ -119,7 +127,7 @@ def get_user_settings_from_db(user_id: int):
                 s.theme,
                 u.avatar_url
             FROM user_settings s
-            JOIN USERS u ON u.user_id = s.user_id
+            JOIN users u ON u.user_id = s.user_id
             WHERE s.user_id = %s
         """
         cursor.execute(query, (user_id,))
@@ -134,7 +142,7 @@ def get_user_settings_from_db(user_id: int):
         return settings
 
     except mysql.connector.Error as err:
-        print(f"MySQL Error occurred: {err}")
+        logger.error("MySQL error in get_user_settings_from_db: %s", err)
         return None
 
     finally:
@@ -149,6 +157,8 @@ def update_user_settings_in_db(user_id: int, settings_dict: dict):
     cursor = None
     try:
         connection = get_db_connection()
+        if not connection:
+            return None
         cursor = connection.cursor()
 
         fields = []
@@ -171,7 +181,7 @@ def update_user_settings_in_db(user_id: int, settings_dict: dict):
     except mysql.connector.Error as err:
         if connection:
             connection.rollback()
-        print(f"MySQL Error occurred: {err}")
+        logger.error("MySQL error in update_user_settings_in_db: %s", err)
         return None
 
     finally:
@@ -187,7 +197,8 @@ def update_user_profile_in_db(user_id: int, profile_dict: dict):
     try:
         connection = get_db_connection()
         if not connection:
-            raise RuntimeError("Database connection returned None")
+            logger.error("Database connection returned None in update_user_profile_in_db")
+            return None
         cursor = connection.cursor()
 
         fields = []
@@ -198,35 +209,50 @@ def update_user_profile_in_db(user_id: int, profile_dict: dict):
                 values.append(val)
 
         if not fields:
-            raise ValueError(f"No valid fields in payload: {list(profile_dict.keys())}")
+            return None
 
         values.append(user_id)
-        query = f"UPDATE USERS SET {', '.join(fields)} WHERE user_id = %s"
+        query = f"UPDATE users SET {', '.join(fields)} WHERE user_id = %s"
 
         cursor.execute(query, tuple(values))
         connection.commit()
 
         return get_user_by_id_basic(user_id)
 
-    except Exception as err:
+    except mysql.connector.Error as err:
         if connection:
             connection.rollback()
-        print(f"Profile update error: {err}", flush=True)
-        raise
+        logger.error("MySQL error in update_user_profile_in_db: %s", err)
+        return None
+
+    finally:
+        if cursor:
+            cursor.close()
+        if connection and connection.is_connected():
+            connection.close()
 
 
 def get_user_by_id_basic(user_id: int):
-    connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
+    connection = None
+    cursor = None
     try:
+        connection = get_db_connection()
+        if not connection:
+            return None
+        cursor = connection.cursor(dictionary=True)
         cursor.execute(
-            "SELECT user_id, username, email, avatar_url FROM USERS WHERE user_id = %s",
+            "SELECT user_id, username, email, avatar_url FROM users WHERE user_id = %s",
             (user_id,),
         )
         return cursor.fetchone()
+    except mysql.connector.Error as err:
+        logger.error("MySQL error in get_user_by_id_basic: %s", err)
+        return None
     finally:
-        cursor.close()
-        connection.close()
+        if cursor:
+            cursor.close()
+        if connection and connection.is_connected():
+            connection.close()
 
 
 def delete_user_in_mysql(username):
@@ -235,13 +261,13 @@ def delete_user_in_mysql(username):
     try:
         connection = get_db_connection()
         if not connection:
-            print("Database connection failed.")
+            logger.error("Database connection failed in delete_user_in_mysql")
             return False
 
         cursor = connection.cursor()
 
         query = """
-            UPDATE USERS
+            UPDATE users
             SET deleted_at = CURRENT_TIMESTAMP
             WHERE username = %s AND deleted_at IS NULL
         """
@@ -253,7 +279,7 @@ def delete_user_in_mysql(username):
     except mysql.connector.Error as err:
         if connection:
             connection.rollback()
-        print(f"MySQL Error occurred: {err}")
+        logger.error("MySQL error in delete_user_in_mysql: %s", err)
         return False
 
     finally:

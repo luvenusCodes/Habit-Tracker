@@ -891,8 +891,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
             {/* SECOND BENTO ROW: PRODUCTIVITY DONUT + EDITABLE LIVE FOCUS TIMER */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                 {/* Productivity Ring Card (7 cols) */}
-                <div className="lg:col-span-7 rounded-3xl backdrop-blur-xl bg-white/75 dark:bg-[#131724]/85 border border-gray-200/80 dark:border-white/10 p-6 flex items-center justify-between gap-4 shadow-sm">
-                    <div className="space-y-4">
+                <div className="lg:col-span-7 overflow-hidden rounded-3xl backdrop-blur-xl bg-white/75 dark:bg-[#131724]/85 border border-gray-200/80 dark:border-white/10 p-5 sm:p-6 flex items-center justify-between gap-3 sm:gap-4 shadow-sm">
+                    <div className="min-w-0 space-y-3 sm:space-y-4">
                         <div>
                             <span className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-slate-400">
                                 Productivity
@@ -909,29 +909,29 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                             </p>
                         </div>
 
-                        <div className="flex items-center gap-6 pt-1">
+                        <div className="flex items-center gap-3.5 sm:gap-6 pt-1">
                             <div>
-                                <p className="text-[11px] font-medium text-gray-400 dark:text-slate-400">
+                                <p className="text-[11px] leading-tight font-medium text-gray-400 dark:text-slate-400">
                                     Habits Completed
                                 </p>
-                                <p className="text-xl font-extrabold text-gray-900 dark:text-white mt-0.5">
+                                <p className="text-lg sm:text-xl font-extrabold text-gray-900 dark:text-white mt-0.5">
                                     {doneCount}
                                 </p>
                             </div>
                             <div>
-                                <p className="text-[11px] font-medium text-gray-400 dark:text-slate-400">
+                                <p className="text-[11px] leading-tight font-medium text-gray-400 dark:text-slate-400">
                                     Total Scheduled
                                 </p>
-                                <p className="text-xl font-extrabold text-gray-900 dark:text-white mt-0.5">
+                                <p className="text-lg sm:text-xl font-extrabold text-gray-900 dark:text-white mt-0.5">
                                     {totalCount}
                                 </p>
                             </div>
                             {scoreSummary && (
                                 <div>
-                                    <p className="text-[11px] font-medium text-gray-400 dark:text-slate-400">
+                                    <p className="text-[11px] leading-tight font-medium text-gray-400 dark:text-slate-400">
                                         Potential
                                     </p>
-                                    <p className="text-xl font-extrabold text-gray-900 dark:text-white mt-0.5">
+                                    <p className="text-lg sm:text-xl font-extrabold text-gray-900 dark:text-white mt-0.5">
                                         {scoreSummary.total_potential_score}p
                                     </p>
                                 </div>
@@ -940,7 +940,7 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                     </div>
 
                     {/* Gradient Donut Ring */}
-                    <div className="relative w-28 h-28 sm:w-32 sm:h-32 shrink-0 flex items-center justify-center">
+                    <div className="relative w-22 h-22 sm:w-32 sm:h-32 shrink-0 flex items-center justify-center">
                         <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
                             <defs>
                                 <linearGradient id="prodRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -991,8 +991,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                     type="button"
                                     onClick={() => handleSelectFocusDuration(mins)}
                                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors ${!editingFocusTime && focusDurationMins === mins
-                                            ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
-                                            : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
+                                        ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
+                                        : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
                                         }`}
                                 >
                                     {mins}m
@@ -1007,9 +1007,9 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                 }}
                                 title="Set custom focus duration"
                                 className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors ${editingFocusTime ||
-                                        ![15, 25, 45].includes(focusDurationMins)
-                                        ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
-                                        : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
+                                    ![15, 25, 45].includes(focusDurationMins)
+                                    ? 'bg-orange-500/20 text-orange-600 dark:text-orange-300'
+                                    : 'text-gray-400 hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300'
                                     }`}
                             >
                                 {![15, 25, 45].includes(focusDurationMins) && !editingFocusTime
@@ -1225,8 +1225,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                         type="button"
                                         onClick={() => setStatusFilter(key)}
                                         className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${active
-                                                ? 'bg-blue-600 text-white shadow-xs'
-                                                : 'bg-gray-100/80 dark:bg-white/6 text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-white/12'
+                                            ? 'bg-blue-600 text-white shadow-xs'
+                                            : 'bg-gray-100/80 dark:bg-white/6 text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-white/12'
                                             }`}
                                     >
                                         {label} ({statusCounts[key]})
@@ -1317,12 +1317,12 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                 <li
                                     key={occ.occurrence_id}
                                     className={`p-4 border rounded-2xl transition-all ${isDone
-                                            ? 'bg-emerald-500/8 dark:bg-emerald-500/10 border-emerald-300/60 dark:border-emerald-500/25'
-                                            : isSkipped || isCarriedOver
-                                                ? 'bg-gray-100/70 dark:bg-white/4 border-gray-200/70 dark:border-white/8 opacity-80'
-                                                : isNotDone
-                                                    ? 'bg-red-500/8 dark:bg-red-500/10 border-red-300/60 dark:border-red-500/25'
-                                                    : 'bg-white/60 dark:bg-white/5 border-gray-200/80 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/8'
+                                        ? 'bg-emerald-500/8 dark:bg-emerald-500/10 border-emerald-300/60 dark:border-emerald-500/25'
+                                        : isSkipped || isCarriedOver
+                                            ? 'bg-gray-100/70 dark:bg-white/4 border-gray-200/70 dark:border-white/8 opacity-80'
+                                            : isNotDone
+                                                ? 'bg-red-500/8 dark:bg-red-500/10 border-red-300/60 dark:border-red-500/25'
+                                                : 'bg-white/60 dark:bg-white/5 border-gray-200/80 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/8'
                                         }`}
                                 >
                                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3.5">
@@ -1341,8 +1341,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                 }
                                                 aria-label={`Toggle ${occ.habit_name_snapshot}`}
                                                 className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center border transition-all shrink-0 disabled:opacity-45 ${isDone
-                                                        ? 'bg-blue-500 border-blue-500 text-white shadow-xs'
-                                                        : 'border-gray-300 dark:border-white/25 hover:border-blue-400'
+                                                    ? 'bg-blue-500 border-blue-500 text-white shadow-xs'
+                                                    : 'border-gray-300 dark:border-white/25 hover:border-blue-400'
                                                     }`}
                                             >
                                                 {isDone && (
@@ -1366,20 +1366,20 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <h3
                                                         className={`font-bold text-sm sm:text-base wrap-break-word ${isDone
-                                                                ? 'text-gray-700 dark:text-slate-200'
-                                                                : 'text-gray-900 dark:text-white'
+                                                            ? 'text-gray-700 dark:text-slate-200'
+                                                            : 'text-gray-900 dark:text-white'
                                                             }`}
                                                     >
                                                         {occ.habit_name_snapshot || occ.habit_name}
                                                     </h3>
                                                     <span
                                                         className={`px-2 py-0.5 text-[11px] rounded-full font-semibold shrink-0 ${(occ.priority_snapshot ||
-                                                                occ.priority) === 'High'
-                                                                ? 'bg-red-500/15 text-red-700 dark:text-red-300'
-                                                                : (occ.priority_snapshot ||
-                                                                    occ.priority) === 'Medium'
-                                                                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                                                                    : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                                            occ.priority) === 'High'
+                                                            ? 'bg-red-500/15 text-red-700 dark:text-red-300'
+                                                            : (occ.priority_snapshot ||
+                                                                occ.priority) === 'Medium'
+                                                                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                                                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                                                             }`}
                                                     >
                                                         {occ.priority_snapshot || occ.priority}
@@ -1401,12 +1401,12 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                 <div className="flex flex-wrap items-center gap-3 mt-1.5">
                                                     <span
                                                         className={`text-[11px] font-bold uppercase tracking-wider ${isDone
-                                                                ? 'text-emerald-600 dark:text-emerald-400'
-                                                                : isNotDone
-                                                                    ? 'text-red-600 dark:text-red-400'
-                                                                    : isSkipped || isCarriedOver
-                                                                        ? 'text-gray-500 dark:text-slate-400'
-                                                                        : 'text-amber-600 dark:text-amber-400'
+                                                            ? 'text-emerald-600 dark:text-emerald-400'
+                                                            : isNotDone
+                                                                ? 'text-red-600 dark:text-red-400'
+                                                                : isSkipped || isCarriedOver
+                                                                    ? 'text-gray-500 dark:text-slate-400'
+                                                                    : 'text-amber-600 dark:text-amber-400'
                                                             }`}
                                                     >
                                                         {occ.status}
@@ -1447,8 +1447,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                     handleStatusUpdate(occ.occurrence_id, 'Done')
                                                 }
                                                 className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-full transition-colors text-center disabled:opacity-45 disabled:cursor-not-allowed ${isDone
-                                                        ? 'bg-emerald-600 text-white shadow-xs'
-                                                        : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-300'
+                                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                                    : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-300'
                                                     }`}
                                             >
                                                 Done
@@ -1465,8 +1465,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                     )
                                                 }
                                                 className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-full transition-colors text-center disabled:opacity-45 disabled:cursor-not-allowed ${isNotDone
-                                                        ? 'bg-red-600 text-white shadow-xs'
-                                                        : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300'
+                                                    ? 'bg-red-600 text-white shadow-xs'
+                                                    : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300'
                                                     }`}
                                             >
                                                 Missed
@@ -1480,8 +1480,8 @@ export const OccurrenceTracker = ({ onNavigateToHabits }: OccurrenceTrackerProps
                                                     handleStatusUpdate(occ.occurrence_id, 'Skipped')
                                                 }
                                                 className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-full transition-colors text-center disabled:opacity-45 disabled:cursor-not-allowed ${isSkipped
-                                                        ? 'bg-gray-600 text-white shadow-xs'
-                                                        : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/14'
+                                                    ? 'bg-gray-600 text-white shadow-xs'
+                                                    : 'bg-white/80 dark:bg-white/8 border border-gray-200/80 dark:border-white/12 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/14'
                                                     }`}
                                             >
                                                 Skip

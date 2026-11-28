@@ -95,6 +95,11 @@ def update_user_profile(
     current_user: dict = Depends(get_current_user)
 ): 
     user_id = current_user.get("user_id") or current_user.get("id")
+    if not user_id and current_user.get("username"):
+        from storage.users_storage import get_user_by_username
+        db_user = get_user_by_username(current_user["username"])
+        user_id = db_user.get("user_id") if db_user else None
+        
     update_data = profile.dict(exclude_unset=True)
     updated_user = update_user_profile_in_db(user_id, update_data)
     if not updated_user:

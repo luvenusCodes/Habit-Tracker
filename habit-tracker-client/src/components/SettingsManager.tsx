@@ -170,8 +170,13 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
             await updateUserProfile({ avatar_url: optimizedDataUrl });
             setBanner({ type: 'success', text: 'Profile picture updated & synced!' });
-        } catch (err) {
-            setBanner({ type: 'error', text: 'Saved on this device, but could not sync your profile picture to the cloud. Please try a smaller image', });
+        } catch (err: unknown) {
+            const detail =
+                (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            setBanner({
+                type: 'error',
+                text: detail || 'Saved on this device, but cloud sync is temporarily unavailable.',
+            });
         }
     };
 

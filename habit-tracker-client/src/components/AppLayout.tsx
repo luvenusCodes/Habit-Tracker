@@ -220,7 +220,13 @@ export default function AppLayout({
                     </svg>
                 </button>
 
-                <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3 px-1'} mb-7`}>
+                <button
+                    type="button"
+                    onClick={() => handleSelectTab('settings')}
+                    title="Open Profile & Settings"
+                    className={`w-full flex items-center ${isCollapsed ? 'justify-center' : 'gap-3 px-1'
+                        } mb-7 text-left rounded-xl hover:opacity-90 transition-opacity focus:outline-none`}
+                >
                     {avatarUrl ? (
                         <img
                             src={avatarUrl}
@@ -242,7 +248,7 @@ export default function AppLayout({
                             </p>
                         </div>
                     )}
-                </div>
+                </button>
 
                 <div className={`mb-2 ${isCollapsed ? 'text-center' : 'px-3'}`}>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-slate-500">
@@ -319,7 +325,12 @@ export default function AppLayout({
 
             {/* MOBILE TOP NAVBAR */}
             <header className="md:hidden flex items-center justify-between bg-white/95 dark:bg-[#0c0d10]/95 backdrop-blur-md border-b border-gray-200 dark:border-white/10 px-4 py-3 sticky top-0 z-30 transition-colors">
-                <div className="flex items-center gap-2.5 min-w-0">
+                <button
+                    type="button"
+                    onClick={() => handleSelectTab('settings')}
+                    aria-label="Open Profile Settings"
+                    className="flex items-center gap-2.5 min-w-0 text-left rounded-xl active:scale-[0.98] transition-transform focus:outline-none"
+                >
                     {avatarUrl ? (
                         <img
                             src={avatarUrl}
@@ -341,14 +352,14 @@ export default function AppLayout({
                             </span>
                         )}
                     </div>
-                </div>
+                </button>
                 <button
                     type="button"
                     onClick={() => {
                         setIsAddMenuOpen(false);
                         setIsMobileMenuOpen(true);
                     }}
-                    className="p-2 rounded-xl bg-gray-100/80 dark:bg-white/6 border border-gray-200/80 dark:border-white/10 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/10 focus:outline-none transition-colors"
+                    className="p-2 rounded-xl bg-gray-100/80 dark:bg-white/[0.06 border border-gray-200/80 dark:border-white/10 text-gray-700 dark:text-slate-200 hover:bg-gray-200/70 dark:hover:bg-white/10 focus:outline-none transition-colors"
                     aria-label="Open Navigation Drawer"
                 >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -373,7 +384,11 @@ export default function AppLayout({
                 >
                     <div>
                         <div className="flex items-center justify-between gap-2.5 px-1.5 pt-1 pb-3.5">
-                            <div className="flex items-center gap-2.5 min-w-0">
+                            <button
+                                type="button"
+                                onClick={() => handleSelectTab('settings')}
+                                className="flex items-center gap-2.5 min-w-0 text-left focus:outline-none"
+                            >
                                 {avatarUrl ? (
                                     <img
                                         src={avatarUrl}
@@ -393,7 +408,7 @@ export default function AppLayout({
                                         {username ? `@${username}` : greeting}
                                     </p>
                                 </div>
-                            </div>
+                            </button>
 
                             <button
                                 type="button"
@@ -464,12 +479,12 @@ export default function AppLayout({
             {/* MOBILE 5-TAB CONCAVE-NOTCH BOTTOM NAVIGATION BAR + ADD POPOVER */}
             <nav
                 aria-label="Mobile Bottom Navigation"
-                className={`md:hidden fixed left-3 right-3 z-40 mobile-nav-wrap transition-all duration-300 ${isMobileMenuOpen ? 'opacity-35 scale-[0.97] pointer-events-none' : 'opacity-100 scale-100'
+                className={`md:hidden fixed left-0 right-0 px-2.5 z-40 mobile-nav-wrap bg-linear-to-t from-gray-50 via-gray-50/95 to-transparent dark:from-[#0c0d10] dark:via-[#0c0d10]/95 dark:to-transparent transition-all duration-300 ${isMobileMenuOpen ? 'opacity-35 scale-[0.97] pointer-events-none' : 'opacity-100 scale-100'
                     }`}
             >
                 {/* Quick-Create Prompt Card Above "Add" */}
                 {isAddMenuOpen && (
-                    <div className="mb-8 mx-auto w-64 rounded-2xl bg-white/98 dark:bg-[#191c25]/98 backdrop-blur-xl border border-gray-200 dark:border-white/12 shadow-[0_18px_40px_rgba(0,0,0,0.5)] p-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <div className="mb-8 mx-auto w-64 rounded-2xl bg-white/98 dark:bg-[#191c25]/98 backdrop-blur-xl border border-gray-200 dark:border-white/12 shadow-[0_18px_40px_rgba(0,0,0,0.5)] p-2">
                         <p className="px-2.5 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-slate-400">
                             Quick Create
                         </p>

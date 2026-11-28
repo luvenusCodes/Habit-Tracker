@@ -14,6 +14,24 @@ const getAuthHeaders = (): HeadersInit => {
     };
 };
 
+export async function loginWithGoogle(credential: string): Promise<{
+    access_token: string;
+    token_type: string;
+    user_id: number;
+    username: string;
+}> {
+    const response = await fetch(`${API_BASE_URL}/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.detail || 'Google authentication failed.');
+    }
+    return data;
+}
+
 export interface HabitCreatePayload {
     habit_name: string;
     description?: string;

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { LoginUserJson } from '../services/api';
+import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
+import { LoginUserJson, loginWithGoogle } from '../services/api';
 
 interface LoginProps {
     onLoginSuccess: () => void;
@@ -19,16 +20,33 @@ export const Login = ({
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [googleNotice, setGoogleNotice] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-        setGoogleNotice(false);
 
         try {
             const response = await LoginUserJson({ username, password });
+            localStorage.setItem('access_token', response.access_token);
+            localStorage.setItem('username', response.username);
+            onLoginSuccess();
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
+        if (!credentialResponse.credential) {
+            setError('Google sign-in did not return a valid credential.');
+            return;
+        }
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await loginWithGoogle(credentialResponse.credential);
             localStorage.setItem('access_token', response.access_token);
             localStorage.setItem('username', response.username);
             onLoginSuccess();
@@ -56,38 +74,18 @@ export const Login = ({
                 </div>
             )}
 
-            {googleNotice && (
-                <div className="p-3 mb-4 text-xs font-medium text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 rounded-2xl text-center">
-                    Google Sign-In will connect once OAuth credentials are configured. Use your username & password below.
-                </div>
-            )}
-
             {/* Continue with Google */}
-            <button
-                type="button"
-                onClick={() => setGoogleNotice(true)}
-                className="w-full py-2.5 px-4 rounded-2xl bg-gray-50 hover:bg-gray-100 dark:bg-white/6 dark:hover:bg-white/10 border border-gray-200 dark:border-white/12 text-sm font-semibold text-gray-800 dark:text-white flex items-center justify-center gap-2.5 transition-colors"
-            >
-                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                    />
-                    <path
-                        fill="#34A853"
-                        d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.1.74-2.51 1.18-4.22 1.18-3.24 0-5.99-2.19-6.97-5.13H1.02v3.14C3.05 21.2 7.24 24 12 24Z"
-                    />
-                    <path
-                        fill="#FBBC05"
-                        d="M5.03 14.04c-.25-.74-.39-1.54-.39-2.36 0-.82.14-1.62.39-2.36V6.18H1.02C.37 7.47 0 8.91 0 10.44s.37 2.97 1.02 4.26l4.01-3.14v2.48Z"
-                    />
-                    <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.79 0 3.41.62 4.68 1.82l3.51-3.51C18.07 1.19 15.3 0 12 0 7.24 0 3.05 2.8 1.02 6.82l4.01 3.14c.98-2.94 3.73-5.21 6.97-5.21Z"
-                    />
-                </svg>
-                <span>Continue with Google</span>
-            </button>
+            <div className="w-full flex justify-center">
+                <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={() => setError('Google Sign-In was cancelled or failed.')}
+                    theme="outline"
+                    size="large"
+                    shape="pill"
+                    text="continue_with"
+                    width="340"
+                />
+            </div>
 
             <div className="my-5 flex items-center gap-3">
                 <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
